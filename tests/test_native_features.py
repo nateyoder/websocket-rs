@@ -21,6 +21,7 @@ def test_native_client_python_visibility_exposes_only_protocol_hooks():
     for hook in (
         "connection_made",
         "data_received",
+        "eof_received",
         "pause_writing",
         "resume_writing",
         "connection_lost",
@@ -38,7 +39,6 @@ def test_native_client_python_visibility_exposes_only_protocol_hooks():
         "build_merged_frame",
     ):
         assert not hasattr(NativeClient, helper)
-
 
 def _server_frame(first_byte, payload):
     if len(payload) <= 125:
