@@ -22,10 +22,6 @@ import struct
 import threading
 import time
 
-import uvloop
-
-uvloop.install()
-
 
 # ---------- Tiny self-contained SOCKS5 no-auth proxy ----------
 
@@ -269,4 +265,12 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Benchmark numbers are only meaningful on the loop this client targets.
+    # Installed here rather than at import time so that importing the SOCKS5
+    # proxy helper (which is plain blocking sockets) stays side-effect free and
+    # works on platforms with no uvloop wheels.
+    import uvloop
+
+    uvloop.install()
+
     asyncio.run(main())

@@ -67,15 +67,18 @@ jobs:
           echo "$PWD/.venv/bin" >> $GITHUB_PATH
 
       - name: Install dependencies with uv
-        run: uv pip install maturin pytest websockets
+        # pytest-asyncio backs the `asyncio_mode = auto` in pytest.ini; without it
+        # the async tests fail outright. It currently arrives as a side effect of
+        # `maturin develop` syncing uv.lock — named here so the suite does not
+        # depend on that. uvloop is the loop this client targets, and this matrix
+        # is Linux-only, so it is always installable.
+        run: uv pip install maturin pytest pytest-asyncio websockets uvloop
 
       - name: Build
         run: maturin develop --release
 
       - name: Run tests
-        run: |
-          python tests/test_compatibility.py
-          python tests/test_timeout_and_errors.py
+        run: pytest tests/
 
   build:
     name: Build wheels
