@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Internal
+
+- **CI runs the whole test suite (#TBD)**: both workflows ran `tests/test_compatibility.py` and `tests/test_timeout_and_errors.py` as scripts, leaving `tests/test_native_features.py` — the file holding the frame-level receive, fragmentation, ping/pong, compression and SOCKS5 coverage — out of CI entirely. They now run `pytest tests/`, which collects all three. Verified against a deliberately corrupted outbound-masking build: the old command passed all 26 tests, the new one fails 23.
+
+  `pytest-asyncio` is now named in both install lists too. It backs the `asyncio_mode = auto` in `pytest.ini`, and without it every `async def` test fails outright; it happened to be present already because `maturin develop` syncs `uv.lock`, which is not a dependency worth leaning on silently.
+
+  What kept that file out was an unguarded module-level `import uvloop`, which cannot resolve on the Windows leg of the `test.yml` matrix. uvloop is installed where it exists and CPython's own loop is used otherwise, matching the idiom `test_timeout_and_errors.py` already used, so the tests run on every platform rather than being skipped on one. `tests/bench_socks5_handshake.py` installed uvloop at import time as well, which the SOCKS5 tests inherited just by importing its proxy helper; that install moved into the benchmark's `__main__`, leaving the helper import side-effect free.
+
 ## [0.7.4] - 2026-07-29
 
 ### Fixed

@@ -58,15 +58,13 @@ jobs:
         # uvloop has no Windows wheels; without it the uvloop half of the
         # peer-close matrix silently drops, and uvloop+wss is a combination
         # that actually regressed once.
-        run: uv pip install maturin pytest websockets "uvloop; sys_platform != 'win32'"
+        run: uv pip install maturin pytest pytest-asyncio websockets "uvloop; sys_platform != 'win32'"
 
       - name: Build
         run: uv run maturin develop --release
 
       - name: Run tests
-        run: |
-          uv run python tests/test_compatibility.py
-          uv run python tests/test_timeout_and_errors.py
+        run: uv run pytest tests/
 
       - name: Run clippy
         run: cargo clippy -- -D warnings
