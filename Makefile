@@ -43,6 +43,13 @@ bench: build
 	@echo "📊 Running benchmarks..."
 	. .venv/bin/activate && python tests/benchmark_server_timestamp.py
 
+# Build the echo servers the A/B harness drives
+bench-servers:
+	@echo "🔧 Building echo servers..."
+	cargo build --release --features echo-server-bin --bin ws_echo_server
+	cargo build --release --bin ws_echo_server_tls
+	@echo "✅ Run: python tests/bench_ab.py --help"
+
 # Clean build artifacts
 clean:
 	@echo "🧹 Cleaning build artifacts..."

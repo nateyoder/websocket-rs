@@ -224,3 +224,46 @@ python tests/benchmark_three_servers.py
 All benchmark scripts pin cores 0/1, use uvloop, disable GC during timing,
 and warm up before measuring. Numbers fluctuate by ~3% run-to-run; figures
 above are from a single representative run after the system stabilized.
+
+## 7. Comparing two builds (`tests/bench_ab.py`)
+
+The scripts above answer "how does websocket-rs compare to other clients". They
+do not answer "did my change help", and that ~3% run-to-run fluctuation is
+exactly the size of the effects worth merging. One change here measured +8.02%,
++4.62%, +2.40%, +2.20% and +2.69% across five sessions on the same machine;
+picking any single number would have put a wrong figure in the CHANGELOG.
+
+`tests/bench_ab.py` measures a change instead of a competitor. Every round runs
+both builds back to back against the same server process, alternating which one
+goes first, and reports the median of the per-round ratios with a bootstrap
+confidence interval. Pairing cancels the drift; the interval reports what is
+left.
+
+```bash
+make bench-servers                      # plain + TLS echo servers
+
+cargo build --release                   # baseline, e.g. from main
+cp target/release/libwebsocket_rs.so /tmp/base.so
+# ... apply your change ...
+cargo build --release
+cp target/release/libwebsocket_rs.so /tmp/cand.so
+
+python tests/bench_ab.py -b /tmp/base.so -c /tmp/cand.so
+python tests/bench_ab.py -b /tmp/base.so -c /tmp/cand.so --sizes 1048576 --rounds 21
+python tests/bench_ab.py -b /tmp/base.so -c /tmp/cand.so --transport tls
+```
+
+`--transport tls` is a genuinely different code path, not just a slower one:
+`wss://` has no raw fd, so every send goes through `build_merged_frame` rather
+than the raw-fd fast path. A change that only touches one of the two needs
+measuring on both.
+
+Each cell runs in its own interpreter with its own staged copy of the package,
+so the two builds never share a process and the working tree's own `.so` is left
+alone while a comparison runs.
+
+Reading the output: the repo gates performance claims at +2% on the median.
+Quote the interval and the round count next to it. An interval straddling zero
+means the run did not resolve the effect, which is a reason to add rounds, not a
+reason to report zero. Sanity check the harness on any host by passing the same
+`.so` as both arms; it should land on zero with an interval that contains it.
