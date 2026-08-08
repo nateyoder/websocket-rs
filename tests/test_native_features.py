@@ -941,3 +941,151 @@ def test_native_receive_timeout_none_skips_wait_for(monkeypatch):
 
     asyncio.run(run())
     thread.join(timeout=2)
+
+
+# ---- outbound masking (fused copy+mask) ----
+
+_MASK_PORT = 8875
+
+
+def _start_exact_capture_server(port, nbytes, out):
+    """Handshake, then read exactly `nbytes` of client frame data into `out`."""
+    import base64
+    import socket as _s
+    import threading
+    from hashlib import sha1
+
+    evt = threading.Event()
+
+    def tiny_server():
+        srv = _s.socket(_s.AF_INET, _s.SOCK_STREAM)
+        srv.setsockopt(_s.SOL_SOCKET, _s.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", port))
+        srv.listen(1)
+        evt.set()
+        conn, _ = srv.accept()
+        try:
+            data = b""
+            while b"\r\n\r\n" not in data:
+                data += conn.recv(4096)
+            key_line = next(
+                ln for ln in data.decode("latin-1").split("\r\n") if ln.lower().startswith("sec-websocket-key:")
+            )
+            key = key_line.split(":", 1)[1].strip()
+            accept = base64.b64encode(sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+            conn.sendall(
+                "\r\n".join(
+                    [
+                        "HTTP/1.1 101 Switching Protocols",
+                        "Upgrade: websocket",
+                        "Connection: Upgrade",
+                        f"Sec-WebSocket-Accept: {accept}",
+                        "",
+                        "",
+                    ]
+                ).encode()
+            )
+            conn.settimeout(5)
+            chunks = []
+            got = 0
+            while got < nbytes:
+                chunk = conn.recv(min(65536, nbytes - got))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                got += len(chunk)
+            out.append(b"".join(chunks))
+        finally:
+            conn.close()
+            srv.close()
+
+    thread = threading.Thread(target=tiny_server, daemon=True)
+    thread.start()
+    evt.wait(timeout=2)
+    return thread
+
+
+def _mask_probe_payload(size):
+    """Non-repeating at any period below 251, so a misaligned mask cannot cancel out."""
+    return bytes((index * 31 + 7) % 251 for index in range(size))
+
+
+def _frame_wire_size(size):
+    header = 2 + (0 if size <= 125 else 2 if size <= 65535 else 8) + 4
+    return header + size
+
+
+# Covers the 1-/2-/8-byte length headers and every shape the fused copy+mask
+# loop can take: empty, sub-word, sub-vector, exact 64-byte multiples, and
+# multiples plus a remainder that falls through to the scalar tail.
+_MASK_SWEEP_SIZES = (0, 1, 3, 5, 63, 64, 65, 125, 126, 65535, 65536, 65537, 100 * 1024 + 3)
+
+
+@pytest.mark.parametrize("size", _MASK_SWEEP_SIZES)
+def test_send_masks_payload_byte_exact_for_frame_size(size):
+    global _MASK_PORT
+    _MASK_PORT += 1
+    port = _MASK_PORT
+    payload = _mask_probe_payload(size)
+    captured = []
+    thread = _start_exact_capture_server(port, _frame_wire_size(size), captured)
+
+    async def run():
+        ws = await connect(f"ws://127.0.0.1:{port}")
+        ws.send(payload)
+        await asyncio.sleep(0.3)
+        ws.close()
+
+    asyncio.run(run())
+    thread.join(timeout=5)
+
+    assert captured, "server captured no client frame"
+    opcode, unmasked = _decode_client_frame_exact(captured[0])
+    assert opcode == 0x2
+    assert unmasked == payload
+
+
+@pytest.mark.parametrize("size", (5, 65537))
+def test_send_while_paused_masks_payload_byte_exact(size):
+    """The queued/merged frame path (paused transport, TLS, no raw fd) masks identically."""
+    global _MASK_PORT
+    _MASK_PORT += 1
+    port = _MASK_PORT
+    payload = _mask_probe_payload(size)
+    captured = []
+    thread = _start_exact_capture_server(port, _frame_wire_size(size), captured)
+
+    async def run():
+        ws = await connect(f"ws://127.0.0.1:{port}")
+        ws.pause_writing()
+        ws.send(payload)
+        ws.resume_writing()
+        await asyncio.sleep(0.3)
+        ws.close()
+
+    asyncio.run(run())
+    thread.join(timeout=5)
+
+    assert captured, "server captured no client frame"
+    opcode, unmasked = _decode_client_frame_exact(captured[0])
+    assert opcode == 0x2
+    assert unmasked == payload
+
+
+def _decode_client_frame_exact(data):
+    """Like _decode_client_frame but asserts the payload arrived complete."""
+    first, second = data[0], data[1]
+    assert second & 0x80, "client frames must be masked"
+    payload_len = second & 0x7F
+    if payload_len == 126:
+        payload_len = int.from_bytes(data[2:4], "big")
+        mask_offset = 4
+    elif payload_len == 127:
+        payload_len = int.from_bytes(data[2:10], "big")
+        mask_offset = 10
+    else:
+        mask_offset = 2
+    mask = data[mask_offset : mask_offset + 4]
+    payload = data[mask_offset + 4 : mask_offset + 4 + payload_len]
+    assert len(payload) == payload_len, f"truncated frame: {len(payload)} of {payload_len}"
+    return first & 0x0F, bytes(byte ^ mask[index & 3] for index, byte in enumerate(payload))

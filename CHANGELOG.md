@@ -7,13 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- **Outbound frames masked in a single pass (#39)**: sending a frame copied the payload into the outbound buffer and then XOR-masked it in place, touching every byte twice. `copy_masked` now reads the source and writes the masked destination in one pass, on both the raw-fd fast path and the merged-frame path used when the transport is paused or has no raw fd (which includes every `wss://` send).
+
+  Isolated on the primitive, fused masking is 1.37x faster at 1 MiB and ~2x at 8 KiB and below, with byte-identical output. End-to-end the win is bounded by masking's share of the round trip, so it only shows up on large frames: 1 MiB request-response is **+2.55% median (66 paired rounds, 95% CI [+1.76%, +3.67%])**. Measured against the exact shipped binary the last 15 of those rounds give +2.99% (95% CI [+1.92%, +5.04%], 13/15 positive). The measured 4.75 µs saved per 1 MiB send is 2.0% of the 238 µs round trip, which is what the end-to-end number independently reproduces.
+
+  256 B and 8 KiB are flat (+0.06% median, 44 paired rounds, 95% CI [-0.68%, +0.62%]) — masking is too small a share of those round trips to move. The **+2% gate is met at 1 MiB only**, and the host was not idle during measurement (other workloads at load average ~1), which is why the confidence interval is reported rather than a bare median.
+
+  `copy_masked` asserts that its two slices are the same length, because the AVX-512 kernel takes its loop bound from the destination and its loads from the source: a shorter source would read out of bounds, and a `debug_assert!` would have been compiled out of the released wheel. All three call sites pass equal lengths today, so this guards a future one. The panic is a cold out-of-line call, and the guard measured neutral against the unguarded build (+0.62% median, 17 paired rounds, 95% CI [-0.55%, +3.96%]).
+
 ### Internal
 
-- **CI runs the whole test suite (#TBD)**: both workflows ran `tests/test_compatibility.py` and `tests/test_timeout_and_errors.py` as scripts, leaving `tests/test_native_features.py` — the file holding the frame-level receive, fragmentation, ping/pong, compression and SOCKS5 coverage — out of CI entirely. They now run `pytest tests/`, which collects all three. Verified against a deliberately corrupted outbound-masking build: the old command passed all 26 tests, the new one fails 23.
+- **CI runs the whole test suite (#38)**: both workflows ran `tests/test_compatibility.py` and `tests/test_timeout_and_errors.py` as scripts, leaving `tests/test_native_features.py` — the file holding the frame-level receive, fragmentation, ping/pong, compression and SOCKS5 coverage — out of CI entirely. They now run `pytest tests/`, which collects all three. Verified against a deliberately corrupted outbound-masking build: the old command passed all 26 tests, the new one fails 23.
 
   `pytest-asyncio` is now named in both install lists too. It backs the `asyncio_mode = auto` in `pytest.ini`, and without it every `async def` test fails outright; it happened to be present already because `maturin develop` syncs `uv.lock`, which is not a dependency worth leaning on silently.
 
   What kept that file out was an unguarded module-level `import uvloop`, which cannot resolve on the Windows leg of the `test.yml` matrix. uvloop is installed where it exists and CPython's own loop is used otherwise, matching the idiom `test_timeout_and_errors.py` already used, so the tests run on every platform rather than being skipped on one. `tests/bench_socks5_handshake.py` installed uvloop at import time as well, which the SOCKS5 tests inherited just by importing its proxy helper; that install moved into the benchmark's `__main__`, leaving the helper import side-effect free.
+
+- **One masking primitive instead of two (#39)**: `apply_mask` and its scalar/AVX-512 pair existed only to serve control frames once `copy_masked` took over the data path. Control-frame encoding now uses `copy_masked` too, and the duplicate AVX-512 kernel is deleted — the Rust side is net smaller while doing strictly more.
+
+- **Outbound masking pinned byte-for-byte (#39)**: a regression suite sweeps payload sizes across the 1-/2-/8-byte length headers and every shape the vectorised loop can take (empty, sub-word, sub-vector, exact 64-byte multiples, and multiples plus a scalar-tail remainder), decoding the frame off the wire and unmasking it. Verified to have teeth: dropping the scalar tail from the AVX-512 path fails 12 of its 15 cases. The scalar kernel is unreachable on an AVX-512 host, so it is the ARM legs of the CI matrix that exercise it — which #38 is what makes possible.
 
 ## [0.7.4] - 2026-07-29
 
