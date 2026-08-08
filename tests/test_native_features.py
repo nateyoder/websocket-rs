@@ -7,12 +7,27 @@ import sys
 import time
 
 import pytest
-import uvloop
 
 import websocket_rs.async_client
 from websocket_rs.native_client import NativeClient, NativeClientBuffered, connect
 
-uvloop.install()
+
+def _install_uvloop():
+    """Install uvloop where it exists.
+
+    uvloop is the loop this client is developed and benchmarked against, but it
+    ships no Windows wheels. There the tests fall back to CPython's own loop
+    instead of being skipped, so the native protocol callbacks stay covered on
+    every platform CI builds for.
+    """
+    try:
+        import uvloop
+    except ImportError:
+        return
+    uvloop.install()
+
+
+_install_uvloop()
 
 PORT = 8860
 
@@ -160,10 +175,9 @@ def _feed_client(ws, data, path):
 def _server(port, ready, cfg):
     import asyncio
 
-    import uvloop
     import websockets
 
-    uvloop.install()
+    _install_uvloop()
 
     async def echo(ws):
         # Record handshake info for later verification
@@ -727,11 +741,10 @@ def test_invalid_uri_scheme_rejected():
 def _compressed_echo_server(port, ready):
     import asyncio as _a
 
-    import uvloop as _u
     import websockets as _ws
     from websockets.extensions.permessage_deflate import ServerPerMessageDeflateFactory
 
-    _u.install()
+    _install_uvloop()
 
     async def echo(ws):
         async for msg in ws:
@@ -758,10 +771,9 @@ def _compressed_echo_server(port, ready):
 def _plain_echo_server(port, ready):
     import asyncio as _a
 
-    import uvloop as _u
     import websockets as _ws
 
-    _u.install()
+    _install_uvloop()
 
     async def echo(ws):
         async for msg in ws:
