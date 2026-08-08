@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Internal
+
+- **A/B benchmark harness (`tests/bench_ab.py`) (#TBD)**: the existing benchmark scripts answer "how does websocket-rs compare to other clients"; none of them answer "did my change help", which is the question the +2% CHANGELOG gate is actually about. Measuring that by hand is where the time goes: the 0.7.5 masking change measured +8.02%, +4.62%, +2.40%, +2.20% and +2.69% across five sessions on this machine, and believing the first would have put a wrong figure in the CHANGELOG.
+
+  The harness takes two built `.so` files and runs paired interleaved rounds: both builds back to back against the same server process, with the arm order alternating each round, reported as the median of per-round ratios with a percentile bootstrap confidence interval. Each cell runs in its own interpreter with its own staged copy of the package, so the two builds never share a process and the working tree's `.so` is untouched while a comparison runs.
+
+  `--transport tls` drives the wss:// path, which is a different code path rather than just a slower one: no raw fd means every send goes through `build_merged_frame`. `make bench-servers` builds both echo servers. Calibrated by passing one build as both arms (+0.16% / -0.09% at 256 B / 1 MiB, intervals containing zero) and by reproducing a known effect (the 0.7.5 masking change, +4.08% at 1 MiB, 11/11 rounds positive).
+
 ### Performance
 
 - **Outbound frames masked in a single pass (#39)**: sending a frame copied the payload into the outbound buffer and then XOR-masked it in place, touching every byte twice. `copy_masked` now reads the source and writes the masked destination in one pass, on both the raw-fd fast path and the merged-frame path used when the transport is paused or has no raw fd (which includes every `wss://` send).
