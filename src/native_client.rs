@@ -44,24 +44,7 @@ const OP_CLOSE: u8 = 0x8;
 const OP_PING: u8 = 0x9;
 const OP_PONG: u8 = 0xA;
 
-/// Apply a 4-byte XOR mask to every byte of `buf`. Dispatches at runtime to
-/// AVX-512 (64-byte stride) when the CPU supports it; otherwise falls back to
-/// the scalar u32 loop which rustc auto-vectorises to AVX2 (32-byte stride)
-/// under the repo's `.cargo/config.toml` `target-feature=+avx2,+bmi2`.
-///
 /// CPU feature detection is cached (one `cpuid` per process) via OnceLock.
-#[inline]
-fn apply_mask(buf: &mut [u8], mask: [u8; 4]) {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if has_avx512f() {
-            unsafe { apply_mask_avx512(buf, mask) };
-            return;
-        }
-    }
-    apply_mask_fallback(buf, mask);
-}
-
 #[cfg(target_arch = "x86_64")]
 fn has_avx512f() -> bool {
     use std::sync::OnceLock;
@@ -69,56 +52,83 @@ fn has_avx512f() -> bool {
     *DETECTED.get_or_init(|| std::is_x86_feature_detected!("avx512f"))
 }
 
-/// Scalar u32 XOR loop. rustc with +avx2 auto-vectorises this to 32-byte VPXOR;
-/// without +avx2 it still beats a naive byte-at-a-time loop ~4x.
+/// Copy `src` into `dst` while applying the 4-byte XOR mask in the same pass.
+///
+/// Equivalent to `dst.copy_from_slice(src)` followed by an in-place XOR, but touches
+/// each byte once instead of twice, which is what matters for outbound frames
+/// large enough to leave L2. `mask[0]` aligns with `src[0]`, matching the RFC
+/// 6455 rule that masking is indexed from the start of the payload.
 #[inline]
-fn apply_mask_fallback(buf: &mut [u8], mask: [u8; 4]) {
+fn copy_masked(dst: &mut [u8], src: &[u8], mask: [u8; 4]) {
+    // Load-bearing for soundness, not a sanity check: the AVX-512 kernel reads
+    // `src` for `dst.len()` bytes, so a shorter `src` would read out of bounds.
+    // The panic is a cold out-of-line call, leaving one predictable compare on
+    // the hot path.
+    if dst.len() != src.len() {
+        length_mismatch(dst.len(), src.len());
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if has_avx512f() {
+            unsafe { copy_masked_avx512(dst, src, mask) };
+            return;
+        }
+    }
+    copy_masked_fallback(dst, src, mask);
+}
+
+#[cold]
+#[inline(never)]
+fn length_mismatch(dst_len: usize, src_len: usize) -> ! {
+    panic!("copy_masked requires equal lengths: dst={dst_len} src={src_len}");
+}
+
+/// Scalar u32 XOR-copy. Both slices are read/written unaligned in 4-byte steps,
+/// which rustc auto-vectorises to 16-/32-byte XOR on any x86-64 baseline; even
+/// unvectorised it beats a byte-at-a-time loop ~4x.
+#[inline]
+fn copy_masked_fallback(dst: &mut [u8], src: &[u8], mask: [u8; 4]) {
     let mask_u32 = u32::from_ne_bytes(mask);
-    let (prefix, words, suffix) = unsafe { buf.align_to_mut::<u32>() };
-    for (i, b) in prefix.iter_mut().enumerate() {
-        *b ^= mask[i & 3];
+    let words = dst.len() / 4;
+    let (dw, dtail) = dst.split_at_mut(words * 4);
+    let (sw, stail) = src.split_at(words * 4);
+    for (d, s) in dw.chunks_exact_mut(4).zip(sw.chunks_exact(4)) {
+        let v = u32::from_ne_bytes([s[0], s[1], s[2], s[3]]) ^ mask_u32;
+        d.copy_from_slice(&v.to_ne_bytes());
     }
-    let head = prefix.len() & 3;
-    let rotated = if head > 0 {
-        mask_u32.rotate_right(8 * head as u32)
-    } else {
-        mask_u32
-    };
-    for w in words.iter_mut() {
-        *w ^= rotated;
-    }
-    let tail_mask = rotated.to_ne_bytes();
-    for (i, b) in suffix.iter_mut().enumerate() {
-        *b ^= tail_mask[i & 3];
+    for (i, (d, s)) in dtail.iter_mut().zip(stail.iter()).enumerate() {
+        *d = *s ^ mask[i & 3];
     }
 }
 
-/// Explicit AVX-512 implementation — 64 bytes per VPXORQ. Unaligned loads/stores
-/// are fine on AVX-512 (no perf cliff). Handles trailing bytes with the scalar
-/// fallback so any length is supported.
+/// AVX-512 XOR-copy — 64 bytes per load/xor/store. Unaligned access carries no
+/// penalty on AVX-512, and the trailing bytes reuse the scalar path.
 ///
-/// SAFETY: caller must ensure AVX-512F is available on the running CPU. The
-/// public `apply_mask` checks this via `is_x86_feature_detected!`.
+/// SAFETY: two preconditions, both established by `copy_masked`:
+/// - AVX-512F is available on this CPU (checked via the cached `has_avx512f()`);
+/// - `dst.len() == src.len()`, because the loop bound comes from `dst` while the
+///   loads come from `src` (asserted, not merely debug-asserted, in the wrapper).
+///
+/// `dst` and `src` are distinct slices — Rust's borrow rules guarantee it at
+/// every call site — so the stores cannot alias the loads.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
-unsafe fn apply_mask_avx512(buf: &mut [u8], mask: [u8; 4]) {
+unsafe fn copy_masked_avx512(dst: &mut [u8], src: &[u8], mask: [u8; 4]) {
     use std::arch::x86_64::*;
-    // Build a 512-bit vector whose 64 bytes are `[mask, mask, ..., mask]`.
-    let mask_u32 = u32::from_ne_bytes(mask);
-    let mask_vec = _mm512_set1_epi32(mask_u32 as i32);
-
-    let ptr = buf.as_mut_ptr();
-    let len = buf.len();
+    let mask_vec = _mm512_set1_epi32(u32::from_ne_bytes(mask) as i32);
+    let len = dst.len();
+    let dptr = dst.as_mut_ptr();
+    let sptr = src.as_ptr();
     let full = len / 64;
     for i in 0..full {
-        let p = ptr.add(i * 64) as *mut __m512i;
-        let v = _mm512_loadu_si512(p as *const __m512i);
+        let off = i * 64;
+        let v = _mm512_loadu_si512(sptr.add(off) as *const __m512i);
         let x = _mm512_xor_si512(v, mask_vec);
-        _mm512_storeu_si512(p, x);
+        _mm512_storeu_si512(dptr.add(off) as *mut __m512i, x);
     }
-    let tail_start = full * 64;
-    if tail_start < len {
-        apply_mask_fallback(&mut buf[tail_start..], mask);
+    let tail = full * 64;
+    if tail < len {
+        copy_masked_fallback(&mut dst[tail..], &src[tail..], mask);
     }
 }
 
@@ -882,13 +892,11 @@ fn native_send(_fd: i32, _buf: &[u8]) -> isize {
 fn encode_control_frame(state: &mut State, opcode: u8, payload: &[u8]) -> Vec<u8> {
     let plen = payload.len().min(125);
     let mask = next_mask_key(state);
-    let mut out = Vec::with_capacity(2 + 4 + plen);
-    out.push(0x80 | opcode);
-    out.push(0x80 | plen as u8);
-    out.extend_from_slice(&mask);
-    out.extend_from_slice(&payload[..plen]);
-    let start = out.len() - plen;
-    apply_mask(&mut out[start..], mask);
+    let mut out = vec![0u8; 2 + 4 + plen];
+    out[0] = 0x80 | opcode;
+    out[1] = 0x80 | plen as u8;
+    out[2..6].copy_from_slice(&mask);
+    copy_masked(&mut out[6..], &payload[..plen], mask);
     out
 }
 
@@ -1192,17 +1200,23 @@ impl NativeClient {
             };
             if drained {
                 let total = header.len() + plen;
-                st.send_buf.clear();
-                st.send_buf.extend_from_slice(header);
-                st.send_buf.extend_from_slice(payload);
-                apply_mask(&mut st.send_buf[header.len()..], mask_key);
-                let written = native_send(fd, &st.send_buf);
+                // Grow-only scratch buffer: `resize` zeroes only the bytes added
+                // when a larger frame arrives, and the steady state reuses the
+                // same allocation without touching it. `send_buf[..total]` is
+                // the live frame; anything past it is stale and never sent.
+                if st.send_buf.len() < total {
+                    st.send_buf.resize(total, 0);
+                }
+                let (hdr_dst, payload_dst) = st.send_buf[..total].split_at_mut(header.len());
+                hdr_dst.copy_from_slice(header);
+                copy_masked(payload_dst, payload, mask_key);
+                let written = native_send(fd, &st.send_buf[..total]);
                 if written == total as isize {
                     return Ok(());
                 }
                 if written > 0 {
                     let n = written as usize;
-                    let tail = PyBytes::new(py, &st.send_buf[n..]);
+                    let tail = PyBytes::new(py, &st.send_buf[n..total]);
                     st.buf_known_empty = false;
                     drop(st);
                     write.bind(py).call1((tail,))?;
@@ -1600,10 +1614,9 @@ impl NativeClient {
     ) -> PyResult<Bound<'py, PyBytes>> {
         let total = header.len() + payload.len();
         PyBytes::new_with(py, total, |buf| {
-            buf[..header.len()].copy_from_slice(header);
-            let p = &mut buf[header.len()..];
-            p.copy_from_slice(payload);
-            apply_mask(p, mask_key);
+            let (hdr_dst, payload_dst) = buf.split_at_mut(header.len());
+            hdr_dst.copy_from_slice(header);
+            copy_masked(payload_dst, payload, mask_key);
             Ok(())
         })
     }
