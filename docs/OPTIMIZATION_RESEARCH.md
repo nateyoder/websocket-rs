@@ -968,3 +968,63 @@ codegen-units = 1
 - 特定壓縮密集 workload 且使用 zlib-ng C backend（會帶回 OpenSSL 風格 system dep）
 
 兩者都是 niche，不影響預設用戶。
+
+## 0.7.5 送出與接收路徑實測（tests/bench_ab.py）
+
+全部用 `tests/bench_ab.py` 量，配對交錯 A/B 加 bootstrap 信賴區間，native client、request-response、server 釘 core 0、client 釘 core 1。主機非閒置，所以一律附區間與回合數。
+
+### 1. TLS 送出路徑沒有吃到 fused masking 的紅利（負面結果）
+
+`wss://` 的 transport 有 `ssl_object`，所以 `raw_fd = None`，每次 send 都走 `build_merged_frame`。0.7.5 的單趟 masking 有改到那條路，也確實會執行，但量不出收益。
+
+| 路徑 | size | RTT | 省下 | 預測 | 實測（15 回合） |
+|---|---|---|---|---|---|
+| plain | 100 KiB | 111 µs | 0.44 µs | 0.40% | +0.25% |
+| plain | 1 MiB | 231 µs | 4.75 µs | 2.05% | +2.55% [+1.76, +3.67] |
+| TLS | 100 KiB | 162 µs | 0.44 µs | 0.27% | +1.87% [+0.22, +3.15] |
+| TLS | 1 MiB | 791 µs | 4.75 µs | 0.60% | -0.95% [-5.86, +1.50] |
+
+原因是分母。TLS 1 MiB 的 RTT 是 plain 的 3.4 倍（791 µs 對 231 µs），AES-GCM 主導了整段往返，同樣省下的 4.75 µs 從 2.05% 稀釋成 0.60%，掉到噪音底線以下。四個點的預測與實測都相容，模型成立。
+
+**結論：不要再為了 TLS 送出路徑做記憶體趟數優化。** 那條路上任何省一趟記憶體的改動，槓桿都只有 plain 的三分之一。這與 Phase 3 報告把 TLS crypto 列為第三方成本、不列候選的判斷一致，差別是現在有直接量測而不只是 profile 佔比。
+
+### 2. 接收路徑的成本分解：是趟數，不是配置
+
+Phase 3 把 `Bytes::copy_from_slice` 列為 plain async 1 MiB 的最大機會（sampled cycles 24.8%，預估 +10~18%）。用三個探針把它拆開，每個探針只改一個變因：
+
+| 探針 | 改了什麼 | 1 MiB | 100 KiB |
+|---|---|---|---|
+| A：多一次 copy（新配置 Bytes） | 趟數 +1、live footprint 加倍 | -42.75% [-46.11, -37.39] | -2.94% |
+| B：多一次 copy（重用 buffer） | 趟數 +1、多一塊常駐 scratch | -8.68% [-13.62, -6.61] | -1.10% |
+| C：移除每則訊息的配置（pooled payload） | 配置 -1、趟數不變 | **-0.98% [-2.25, +0.35]** | -0.28% |
+| D：同一塊 buffer 上多複製一次 | **只有趟數 +1**，配置與 footprint 完全相同 | **-7.58% [-9.48, -2.07]** | +1.53% [-1.78, +2.66] |
+
+探針 A 的 -42.75% 很容易被誤讀成「配置很貴」。探針 C 否證了這點：把每則訊息的配置完全拿掉，收益是零。穩態下 allocator 會把剛釋放的同尺寸區塊立刻交還，記憶體早已 faulted in，所以單一配置近乎免費。A 量到的是「同時存在兩份 1 MiB」讓 working set 加倍的代價，不是配置本身。
+
+探針 D 是唯一足跡受控的比較，也是該引用的那個數字：**一趟 1 MiB 記憶體值 7.6%**。
+
+100 KiB 全部落在噪音內，與 Zen5 的 1 MB L2 一致：資料留在快取裡時第二趟幾乎免費。**超過 L2 才有真成本**，這也是 0.7.5 送出路徑 1 MiB 有 +2.55%、100 KiB 只有 +0.25% 的同一個物理現象。
+
+### 3. owned slab 候選的重新評估
+
+`.phase3-reference/PHASE3-DESIGN-SLAB.md` 把接收端 owned slab 判為 ABANDON，理由是一塊 slab 可能同時含多個 frame，只要其中一個長期存活，整塊 capacity 都無法回收，因此沒有有限的 peak-memory 上界。**這個推理針對的是共享 slab 的通用設計，並沒有被上面的量測推翻。**
+
+但收益只存在於超過 L2 的尺寸，而那個尺寸的訊息本來就是一個 frame 塞滿一次 read。用尺寸門檻把設計文件擔心的情境整個排除掉之後：一塊 buffer 只承載一則訊息，使用者保留訊息時被釘住的就是他自己正在持有的那段 payload，沒有額外被釘住的 capacity，記憶體上界自然成立。
+
+實作必須處理的邊界已經量到了：pooled 探針（C）會讓 `test_async_for_iteration` 失敗，因為它無條件重用仍被引用的 buffer。正確的設計要在引用歸零時才回收。
+
+修正後的預估收益是 **+7.6%（1 MiB，探針 D 的上限）**，不是原報告的 +10~18%，因為配置那一項實測為零。門檻以下不做，因為量不到。
+
+## 不要重試的方向（累積清單）
+
+以下都測過並留有負面結果，重試等於浪費時間：
+
+- `#[inline]` 標註：慢 5.7%
+- flume channel：慢 15%
+- batch API：所有場景退步
+- `target-cpu=native`：五次測試 0% 實質收益
+- sendmsg/iovec：已由同專案 profiling 證明不如連續可重用 buffer
+- PyO3 coroutine bridge / `future_into_py`：分別慢 84% / 43%
+- parking_lot::RwLock：低競爭場景慢 5.6%
+- **TLS 送出路徑的記憶體趟數優化：crypto 主導，槓桿只有 plain 的三分之一（本次新增）**
+- **移除接收路徑每則訊息的配置：實測 -0.98%，allocator 穩態下已經免費（本次新增）**
