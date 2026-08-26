@@ -210,9 +210,17 @@ pub(crate) fn build_handshake(
     hasher.update(accept_src.as_bytes());
     let expected = base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
 
+    // RFC 6874: IPv6 literals stay bracketed in the Host header even though
+    // parse_ws_uri hands us the bare literal.
+    let host_header = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
+
     let mut req = format!(
         "GET {path} HTTP/1.1\r\n\
-         Host: {host}:{port}\r\n\
+         Host: {host_header}:{port}\r\n\
          Upgrade: websocket\r\n\
          Connection: Upgrade\r\n\
          Sec-WebSocket-Key: {key}\r\n\
@@ -273,4 +281,31 @@ pub(crate) fn decompress_message(
         .read_to_end(&mut out)
         .map_err(|e| ProtocolCoreError(format!("deflate decode error: {e}")))?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_handshake_ipv6_host_header_rebrackets_bare_literal() {
+        // parse_ws_uri hands us the bare literal; the wire needs [::1].
+        let (req, _) = build_handshake("::1", 8860, "/path", &[], &[], false);
+        let req = std::str::from_utf8(&req).unwrap();
+        assert!(
+            req.contains("Host: [::1]:8860\r\n"),
+            "Host header must re-bracket IPv6 literals, got: {req}"
+        );
+        assert!(!req.contains("Host: ::1:"), "bare literal must not leak");
+    }
+
+    #[test]
+    fn test_build_handshake_ipv4_and_hostname_untouched() {
+        for host in ["127.0.0.1", "example.com"] {
+            let (req, _) = build_handshake(host, 80, "/", &[], &[], false);
+            let req = std::str::from_utf8(&req).unwrap();
+            assert!(req.contains(&format!("Host: {host}:80\r\n")));
+            assert!(!req.contains("["), "no brackets expected for {host}");
+        }
+    }
 }

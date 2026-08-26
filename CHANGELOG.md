@@ -5,15 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.8] - 2026-08-26
+
+### Fixed
+
+- **`ws://[::1]:port/...` URIs are now connectable on every client.** `parse_ws_uri` kept the URL crate's bracketed IPv6 literal, and `getaddrinfo("[::1]")` fails — so IPv6 loopback (and any literal IPv6 host) raised `gaierror` before a socket was ever opened. `parse_ws_uri` now strips the brackets; `build_handshake` re-brackets the literal for the `Host` header as RFC 6874 requires. The sync client had the same failure through a second path — `http::Uri::host()` keeps the brackets, so its dialer fed `"[::1]"` to `getaddrinfo` and rustls; both now get the bare literal. The unit test asserting this had existed since the monolith but was unrunnable (below), so the drift went unnoticed.
+
+- **Rust unit tests revived**: the #44 module split left `mod.rs`'s test imports pointing at pre-split paths (`cargo test --lib` failed with E0432; all 13 pre-existing tests dead, plus two new `build_handshake` Host-header tests). Imports now name their `codec::` / `protocol::` homes. pyo3's `extension-module` moved behind a default feature so `cargo test --lib --no-default-features` can link libpython; maturin builds keep the default and behave identically. CI now runs the suite in both workflows.
+
+### Changed
+
+- **Sync client dials eagerly**: `websocket_rs.sync.client.connect()` returns a connected client, matching native/async semantics. Re-entering `with` is a no-op instead of re-dialing over the live socket.
+- **Sync client rejects unknown keyword arguments** with `TypeError`. It previously accepted `**kwargs` silently, so `headers=`, `proxy=` etc. disappeared without effect.
+- **Sync client accepts `subprotocols=`**, matching native/async; the negotiated value surfaces on the new `subprotocol` property. Previously a silent no-op. On `SyncClientConnection` and `sync.client.connect()` it sits **last** in the parameter list; keyword callers are unaffected.
+- **Sync `ping()`/`pong()` reject payloads over 125 bytes** with `ValueError`, matching native. tungstenite only validates control-frame size on read, so oversized pings used to go on the wire until an RFC-compliant server killed the connection with 1002.
+
+### Added
+
+- **Native client surface parity**: `NativeClient` gains `pong()` (same 125-byte limit as `ping()`), plus `closed`, `local_address`, `remote_address` properties. `SyncClientConnection` gains `subprotocol` (captured from the handshake response). All three clients now expose the same core introspection surface; differences that remain are deliberate and documented (native close is fire-and-forget, so `close_timeout` applies only to sync).
+
+### Internal
+
+- `scripts/test.sh` no longer references deleted files (`test_monkeypatch.py`, `benchmark_optimized.py`, `benchmark_latency.py`); it runs the same pytest suite as CI. `make bench` points at the existing `tests/bench_ab.py`. Docs corrected: API.md module paths (`websocket_rs.sync.client`), timeout defaults (10.0), README proxy/close semantics. Benchmarks use `inspect.iscoroutinefunction` ahead of the `asyncio` deprecation.
+
 ## [0.7.7] - 2026-08-23
 
 ### Internal
 
 - **The three receive fast paths now share one frame-walking core**: `data_received`, the zero-copy `PyBytes` variant, and `parse_recv_data` each carried their own copy of the opcode dispatch loop, and 0.7.6's ping fix had to be applied to all three by hand. They now delegate to a single `scan_frame_aligned` visitor next to `ProtocolCore`'s walker, so ping answering, close handling, and message delivery have one implementation instead of four near-copies. One observable timing change: the buffered `parse_recv_data` window used to write each pong mid-scan; it now queues pongs until the scan releases the State borrow, matching the zero-copy path, the plain-chunk path, and ProtocolCore's "pong, then close" event order (a mid-scan error discards queued pongs, exactly as the zero-copy path already did). Three new tests pin ping-then-message, ping-then-close ordering, and a ping split across a buffered window boundary.
 
-- **Future-resolution guards and protocol-error teardown consolidated**: the four inline `!future.done()` probe-then-resolve sites became `set_future_result` / `set_future_exception`, which name the two policies (resolve even if the probe loses a race, never throw during teardown), and protocol-error close framing moved into `begin_protocol_error`, mirroring `begin_peer_close`. No behavior change intended or observed.
+- **Future-resolution guards and protocol-error teardown consolidated**: the four inline `!future.done()` probe-then-resolve sites became `set_future_result` / `set_future_exception`, which name the two policies (resolve even if the probe loses a race, never throw during teardown), and protocol-error close framing moved into `begin_protocol_error`, mirroring `begin_peer_close`. One narrow error-path delta on top of the disclosed set: at the handshake-completion site the whole resolve now goes through `set_future_result` with its result discarded, so a `done()`-probe error is swallowed there too (pre-refactor only a `set_result` failure was swallowed; the probe error propagated). Unreachable through stock asyncio (`Future.done()` does not raise); noted for instrumentation that wraps futures.
 
-- **native_client.rs split into modules**: the 2432-line file is now a directory module — `codec.rs` (frame primitives: masking, header parse, frame walk), `protocol.rs` (ProtocolCore state machine, handshake accept key, permessage-deflate decode), `client.rs` (pyclass bindings, State, send-side control frames), and `mod.rs` (`connect()`, URI parsing, registration, unit tests). The ~110-line embedded SOCKS5 connect helper moves from an `r#"..."#` literal to `include_str!("connect_helper.py")`, so it is visible to editors and linters.
+- **native_client.rs split into modules**: the 2481-line file is now a directory module — `codec.rs` (frame primitives: masking, header parse, frame walk), `protocol.rs` (ProtocolCore state machine, handshake accept key, permessage-deflate decode), `client.rs` (pyclass bindings, State, send-side control frames), and `mod.rs` (`connect()`, URI parsing, registration, unit tests). The ~110-line embedded SOCKS5 connect helper moves from an `r#"..."#` literal to `include_str!("connect_helper.py")`, so it is visible to editors and linters.
 
 - **No performance change measured**: paired interleaved A/B against the 0.7.6 release binary (21 rounds per cell, bootstrap 95% CI) puts every cell inside noise — plain transport medians +0.34% at 256 B [-0.60%, +1.58%], −0.20% at 8 KiB [-0.59%, +0.20%], +0.18% at 100 KiB [-0.17%, +0.99%], +0.20% at 1 MiB [-0.64%, +0.56%]; TLS 1 MiB −0.34% [-1.32%, +0.42%]. All intervals straddle zero; none meets or breaches the ±2% gate. The split .so is also ~3 KB smaller than 0.7.6's.
 

@@ -76,6 +76,20 @@ class NativeClient:
     def close_code(self) -> int | None: ...
     @property
     def close_reason(self) -> str | None: ...
+    @property
+    def closed(self) -> bool:
+        """True once the connection has been torn down (client or peer)."""
+        ...
+    # Addresses proxy transport.get_extra_info(); IPv6 peers report
+    # 4-tuples (host, port, flowinfo, scope), not plain (host, port).
+    @property
+    def local_address(self) -> tuple[str | bytes, int, ...] | None: ...
+    @property
+    def remote_address(self) -> tuple[str | bytes, int, ...] | None: ...
+
+    def pong(self, data: bytes | None = None) -> None:
+        """Send a pong frame proactively; same 125-byte limit as ping."""
+        ...
 
 async def connect(
     uri: str,

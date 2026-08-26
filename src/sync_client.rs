@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use pyo3::exceptions::{PyConnectionError, PyRuntimeError, PyTimeoutError};
+use pyo3::exceptions::{PyConnectionError, PyRuntimeError, PyTimeoutError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString};
 use std::io::{self, Read, Write};
@@ -268,6 +268,9 @@ fn map_receive_error(error: tungstenite::Error, receive_timeout: f64) -> PyErr {
 pub struct SyncClientConnection {
     url: String,
     ws: Option<WebSocket<WsStream>>,
+    /// Protocols to offer in `Sec-WebSocket-Protocol`; negotiated value lands
+    /// in `subprotocol` after the handshake.
+    subprotocols: Vec<String>,
     connect_timeout: f64,
     receive_timeout: f64,
     close_timeout: f64,
@@ -276,22 +279,25 @@ pub struct SyncClientConnection {
     remote_addr: Option<(String, u16)>,
     close_code: Option<u16>,
     close_reason: Option<String>,
+    subprotocol: Option<String>,
 }
 
 #[pymethods]
 impl SyncClientConnection {
     #[new]
-    #[pyo3(signature = (url, connect_timeout=None, receive_timeout=None, close_timeout=None, tcp_nodelay=None))]
+    #[pyo3(signature = (url, connect_timeout=None, receive_timeout=None, close_timeout=None, tcp_nodelay=None, subprotocols=None))]
     fn new(
         url: String,
         connect_timeout: Option<f64>,
         receive_timeout: Option<f64>,
         close_timeout: Option<f64>,
         tcp_nodelay: Option<bool>,
+        subprotocols: Option<Vec<String>>,
     ) -> Self {
         SyncClientConnection {
             url,
             ws: None,
+            subprotocols: subprotocols.unwrap_or_default(),
             connect_timeout: connect_timeout.unwrap_or(DEFAULT_CONNECT_TIMEOUT),
             receive_timeout: receive_timeout.unwrap_or(DEFAULT_RECEIVE_TIMEOUT),
             close_timeout: close_timeout.unwrap_or(DEFAULT_CLOSE_TIMEOUT),
@@ -300,6 +306,7 @@ impl SyncClientConnection {
             remote_addr: None,
             close_code: None,
             close_reason: None,
+            subprotocol: None,
         }
     }
 
@@ -308,6 +315,10 @@ impl SyncClientConnection {
     // This is safe because PyO3's PyRefMut guarantees exclusive borrow — no other
     // Python thread can access this object while we hold the mutable reference.
     fn __connect(&mut self, py: Python<'_>) -> PyResult<()> {
+        // Idempotent: `connect()` already dialed, and `with` re-entry is a no-op.
+        if self.ws.is_some() {
+            return Ok(());
+        }
         let url = self.url.clone();
         let connect_timeout = self.connect_timeout;
         let receive_timeout = self.receive_timeout;
@@ -315,14 +326,29 @@ impl SyncClientConnection {
 
         py.detach(|| {
             // Parse URL and resolve address
-            let request = url
+            let mut request = url
                 .clone()
                 .into_client_request()
                 .map_err(|e| PyConnectionError::new_err(format!("Invalid URL: {}", e)))?;
+            if !self.subprotocols.is_empty() {
+                request.headers_mut().insert(
+                    "Sec-WebSocket-Protocol",
+                    tungstenite::http::HeaderValue::from_str(&self.subprotocols.join(", "))
+                        .map_err(|e| {
+                            PyValueError::new_err(format!("Invalid subprotocol: {}", e))
+                        })?,
+                );
+            }
             let uri = request.uri().clone();
+            // http keeps IPv6 brackets in host(); both to_socket_addrs and
+            // rustls' ServerName need the bare literal.
             let host = uri
                 .host()
-                .ok_or_else(|| PyConnectionError::new_err("Missing host in URL"))?
+                .ok_or_else(|| PyConnectionError::new_err("Missing host in URL"))?;
+            let host = host
+                .strip_prefix('[')
+                .and_then(|h| h.strip_suffix(']'))
+                .unwrap_or(host)
                 .to_string();
             let is_tls = uri.scheme_str() == Some("wss");
             let port = uri.port_u16().unwrap_or(if is_tls { 443 } else { 80 });
@@ -366,14 +392,17 @@ impl SyncClientConnection {
                 WsStream::plain(tcp)
             };
 
-            let (ws, _) = tungstenite::client(request, ws_stream).map_err(|error| match error {
-                tungstenite::HandshakeError::Failure(tungstenite::Error::Io(error))
-                    if is_python_error(&error) =>
-                {
-                    error.into()
-                }
-                error => PyConnectionError::new_err(format!("WebSocket handshake failed: {error}")),
-            })?;
+            let (ws, response) =
+                tungstenite::client(request, ws_stream).map_err(|error| match error {
+                    tungstenite::HandshakeError::Failure(tungstenite::Error::Io(error))
+                        if is_python_error(&error) =>
+                    {
+                        error.into()
+                    }
+                    error => {
+                        PyConnectionError::new_err(format!("WebSocket handshake failed: {error}"))
+                    }
+                })?;
 
             // Reset timeouts: read = receive_timeout, write = unlimited
             let tcp_ref = ws.get_ref().tcp_ref();
@@ -388,6 +417,12 @@ impl SyncClientConnection {
             if let Ok(a) = tcp_ref.peer_addr() {
                 self.remote_addr = Some((a.ip().to_string(), a.port()));
             }
+
+            self.subprotocol = response
+                .headers()
+                .get("sec-websocket-protocol")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
 
             self.ws = Some(ws);
             Ok(())
@@ -500,6 +535,11 @@ impl SyncClientConnection {
 
     fn ping(&mut self, py: Python<'_>, data: Option<Vec<u8>>) -> PyResult<()> {
         let data = data.unwrap_or_default();
+        if data.len() > 125 {
+            return Err(PyValueError::new_err(
+                "ping payload exceeds 125 bytes (WS control-frame limit)",
+            ));
+        }
         py.detach(|| {
             let ws = self
                 .ws
@@ -512,6 +552,11 @@ impl SyncClientConnection {
 
     fn pong(&mut self, py: Python<'_>, data: Option<Vec<u8>>) -> PyResult<()> {
         let data = data.unwrap_or_default();
+        if data.len() > 125 {
+            return Err(PyValueError::new_err(
+                "pong payload exceeds 125 bytes (WS control-frame limit)",
+            ));
+        }
         py.detach(|| {
             let ws = self
                 .ws
@@ -537,6 +582,10 @@ impl SyncClientConnection {
     #[getter]
     fn remote_address(&self) -> Option<(String, u16)> {
         self.remote_addr.clone()
+    }
+    #[getter]
+    fn subprotocol(&self) -> Option<String> {
+        self.subprotocol.clone()
     }
     #[getter]
     fn close_code(&self) -> Option<u16> {
@@ -587,23 +636,30 @@ impl SyncClientConnection {
     }
 }
 
+// No `**kwargs` here on purpose: an unsupported option must raise TypeError,
+// never disappear into a silent sink. headers/subprotocols/ssl_context/proxy/
+// compression/on_message are native-client features.
 #[pyfunction]
-#[pyo3(signature = (uri, connect_timeout=None, receive_timeout=None, close_timeout=None, tcp_nodelay=None, **_kwargs))]
+#[pyo3(signature = (uri, connect_timeout=None, receive_timeout=None, close_timeout=None, tcp_nodelay=None, subprotocols=None))]
 pub fn connect(
+    py: Python<'_>,
     uri: String,
     connect_timeout: Option<f64>,
     receive_timeout: Option<f64>,
     close_timeout: Option<f64>,
     tcp_nodelay: Option<bool>,
-    _kwargs: Option<&Bound<'_, PyAny>>,
+    subprotocols: Option<Vec<String>>,
 ) -> PyResult<SyncClientConnection> {
-    Ok(SyncClientConnection::new(
+    let mut conn = SyncClientConnection::new(
         uri,
         connect_timeout,
         receive_timeout,
         close_timeout,
         tcp_nodelay,
-    ))
+        subprotocols,
+    );
+    conn.__connect(py)?;
+    Ok(conn)
 }
 
 pub fn register_sync_client(py: Python<'_>, parent_module: &Bound<'_, PyModule>) -> PyResult<()> {

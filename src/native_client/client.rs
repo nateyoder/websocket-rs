@@ -865,6 +865,43 @@ impl NativeClient {
         self.state.borrow().close_reason.clone()
     }
 
+    /// True once the client has torn the connection down; mirrors
+    /// `SyncClientConnection.closed`.
+    #[getter]
+    fn closed(&self) -> bool {
+        self.state.borrow().closed
+    }
+
+    #[getter]
+    fn local_address<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        // Clone the transport out first: call_method1 may run arbitrary
+        // Python, which must not reenter a live RefCell borrow.
+        let transport = self
+            .state
+            .borrow()
+            .transport
+            .as_ref()
+            .map(|t| t.clone_ref(py));
+        match transport {
+            Some(t) => t.bind(py).call_method1("get_extra_info", ("sockname",)),
+            None => Ok(py.None().into_bound(py)),
+        }
+    }
+
+    #[getter]
+    fn remote_address<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let transport = self
+            .state
+            .borrow()
+            .transport
+            .as_ref()
+            .map(|t| t.clone_ref(py));
+        match transport {
+            Some(t) => t.bind(py).call_method1("get_extra_info", ("peername",)),
+            None => Ok(py.None().into_bound(py)),
+        }
+    }
+
     /// Send a ping frame. Payload must be ≤125 bytes (control-frame limit).
     #[pyo3(signature = (data=None))]
     fn ping(&self, py: Python<'_>, data: Option<Vec<u8>>) -> PyResult<()> {
@@ -884,6 +921,32 @@ impl NativeClient {
             .ok_or_else(|| PyRuntimeError::new_err("No transport"))?
             .clone_ref(py);
         let frame = encode_control_frame(&mut state, OP_PING, &payload);
+        drop(state);
+        transport
+            .bind(py)
+            .call_method1("write", (PyBytes::new(py, &frame),))?;
+        Ok(())
+    }
+
+    /// Send a pong frame proactively. Same limits as `ping`.
+    #[pyo3(signature = (data=None))]
+    fn pong(&self, py: Python<'_>, data: Option<Vec<u8>>) -> PyResult<()> {
+        let payload = data.unwrap_or_default();
+        if payload.len() > 125 {
+            return Err(PyValueError::new_err(
+                "pong payload exceeds 125 bytes (WS control-frame limit)",
+            ));
+        }
+        let mut state = self.state.borrow_mut();
+        if state.closed {
+            return Err(PyRuntimeError::new_err("WebSocket is closed"));
+        }
+        let transport = state
+            .transport
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("No transport"))?
+            .clone_ref(py);
+        let frame = encode_control_frame(&mut state, OP_PONG, &payload);
         drop(state);
         transport
             .bind(py)
@@ -950,7 +1013,8 @@ impl NativeClient {
     }
 
     /// Single pass over frame-aligned `data` — THE opcode dispatch shared by
-    /// every receive path: deliver TEXT/BINARY per `mode`, queue one masked
+    /// the three frame-aligned receive paths; ProtocolCore::next_event walks
+    /// its own loop for fragmented/compressed traffic. Deliver TEXT/BINARY per `mode`, queue one masked
     /// pong per unfragmented PING, stop at the first peer CLOSE.
     ///
     /// Borrow discipline: queued pongs are written and peer-close effects
@@ -1076,12 +1140,11 @@ impl NativeClient {
         pb: &Bound<'py, PyBytes>,
         data: &[u8],
     ) -> PyResult<()> {
-        if self.fast_path_eligible() {
-            let outcome = self.scan_frame_aligned(py, data, PayloadMode::ZeroCopy { pb })?;
-            return self.park_tail_and_drain(py, outcome, data);
+        if !self.fast_path_eligible() {
+            return self.data_received_inner(py, data);
         }
-        self.state.borrow_mut().buf.extend_from_slice(data);
-        self.process_buffered_frames(py)
+        let outcome = self.scan_frame_aligned(py, data, PayloadMode::ZeroCopy { pb })?;
+        self.park_tail_and_drain(py, outcome, data)
     }
 
     fn data_received_inner(&self, py: Python<'_>, data: &[u8]) -> PyResult<()> {
