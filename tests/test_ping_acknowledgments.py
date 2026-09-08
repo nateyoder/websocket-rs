@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import contextlib
+import gc
 import hashlib
 import ssl
 import subprocess
@@ -377,16 +378,21 @@ def test_ack_failure_does_not_interrupt_siblings_or_control_traffic(loop_factory
                 if failure == "remove_done_callback":
                     assert await first is None
                 else:
-                    with pytest.raises(RuntimeError, match="injected"):
+                    with pytest.raises(RuntimeError, match="injected") as caught:
                         await first
+                    caught.value.__traceback__ = None
                 assert await asyncio.wait_for(second, 1) is None
                 assert bytes(await ws.recv()) == (b"startend" if fragmented else b"application")
                 with pytest.raises(ConnectionError):
                     await asyncio.wait_for(closing, 1)
                 assert await read_frame(reader) == (0x8A, b"server")
                 assert ws.closed
-    with asyncio.Runner(loop_factory=loop_factory) as runner:
-        runner.run(asyncio.wait_for(scenario(), 5))
+    try:
+        with asyncio.Runner(loop_factory=loop_factory) as runner:
+            runner.run(asyncio.wait_for(scenario(), 5))
+    finally:
+        # Injected exception/callback cycles must die on the client-owning thread.
+        gc.collect()
 
 
 def _exercise_duplicate_reentry(mode, loop_name):
@@ -426,6 +432,67 @@ def test_duplicate_check_allows_future_reentry(mode, loop_name):
     code = (
         "from tests.test_ping_acknowledgments import _exercise_duplicate_reentry; "
         f"_exercise_duplicate_reentry({mode!r}, {loop_name!r})"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _exercise_creation_reentry(stage, mode, loop_name):
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        original_factory = loop.create_future
+        hook = None
+        replacements = []
+
+        def reenter():
+            nonlocal hook
+            callback, hook = hook, None
+            if callback is not None:
+                callback()
+
+        class CreationFuture(asyncio.Future):
+            def add_done_callback(self, callback, *, context=None):
+                if stage == "add_done_callback":
+                    reenter()
+                return super().add_done_callback(callback, context=context)
+
+        def create_future():
+            if stage == "create_future":
+                reenter()
+            return CreationFuture(loop=loop)
+
+        loop.create_future = create_future
+        try:
+            async with peer(None) as (ws, _reader, _writer):
+                hook = ws.close if mode == "close" else lambda: replacements.append(ws.ping_waiter(b"same"))
+                with pytest.raises(ConnectionError if mode == "close" else ValueError):
+                    ws.ping_waiter(b"same")
+                if mode == "close":
+                    assert ws.closed
+                else:
+                    assert len(replacements) == 1
+                    ws.data_received(frame(0x8A, b"same"))
+                    assert await asyncio.wait_for(replacements[0], 1) is None
+        finally:
+            loop.create_future = original_factory
+
+    factory = asyncio.SelectorEventLoop
+    if loop_name == "uvloop":
+        import uvloop
+        factory = uvloop.new_event_loop
+    with asyncio.Runner(loop_factory=factory) as runner:
+        runner.run(asyncio.wait_for(scenario(), 5))
+
+
+@pytest.mark.parametrize("stage", ["create_future", "add_done_callback"])
+@pytest.mark.parametrize("mode", ["close", "replace"])
+@pytest.mark.parametrize("loop_name", ["asyncio", "uvloop"])
+def test_creation_checks_allow_future_reentry(stage, mode, loop_name):
+    if loop_name == "uvloop":
+        pytest.importorskip("uvloop")
+    code = (
+        "from tests.test_ping_acknowledgments import _exercise_creation_reentry; "
+        f"_exercise_creation_reentry({stage!r}, {mode!r}, {loop_name!r})"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
