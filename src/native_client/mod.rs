@@ -90,6 +90,10 @@ fn connect<'py>(
             create_future: None,
             wait_for: None,
             subprotocol: None,
+            close_received_code: None,
+            close_received_reason: None,
+            close_sent_code: None,
+            close_sent_reason: None,
             close_code: None,
             close_reason: None,
             receive_timeout,
@@ -439,6 +443,8 @@ mod tests {
         let mut state = CoreState {
             buf: BytesMut::from(
                 &b"HTTP/1.1 101 Switching Protocols\r\n\
+                   Upgrade: websocket\r\n\
+                   Connection: Upgrade\r\n\
                    Sec-WebSocket-Accept: expected\r\n\
                    Sec-WebSocket-Protocol: chat\r\n\
                    Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n"[..],

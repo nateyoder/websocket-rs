@@ -145,6 +145,10 @@ pub(crate) struct State {
     /// Close-frame fields (populated after receiving a CLOSE opcode).
     pub(crate) close_code: Option<u16>,
     pub(crate) close_reason: Option<String>,
+    pub(crate) close_received_code: Option<u16>,
+    pub(crate) close_received_reason: Option<String>,
+    pub(crate) close_sent_code: Option<u16>,
+    pub(crate) close_sent_reason: Option<String>,
     /// Optional per-recv timeout (seconds). Applied via asyncio.wait_for wrapper
     /// only when the slow path would block — backlog fast-path skips it.
     pub(crate) receive_timeout: Option<f64>,
@@ -160,6 +164,20 @@ pub(crate) struct State {
 }
 
 impl State {
+    /// Break cached Python cycles while still on the owning event-loop thread.
+    fn release_references(&mut self) {
+        self.transport = None;
+        self.transport_write = None;
+        self.transport_get_buf_size = None;
+        self.raw_fd = None;
+        self.loop_ref = None;
+        self.on_message = None;
+        self.create_future = None;
+        self.wait_for = None;
+        self.write_queue.clear();
+        self.pending_callback_msgs.clear();
+    }
+
     fn take_ping(&mut self, payload: &[u8]) -> Option<PendingPing> {
         let pings = self.pending_pings.as_mut()?;
         let ping = pings.remove(payload);
@@ -171,6 +189,9 @@ impl State {
 
     fn take_pending(&mut self) -> VecDeque<Py<PyAny>> {
         let mut pending = std::mem::take(&mut self.pending_recv);
+        if let Some(future) = self.handshake_fut.take() {
+            pending.push_back(future);
+        }
         if let Some(mut pings) = self.pending_pings.take() {
             pending.extend(pings.drain().map(|(_, ping)| ping.future));
         }
@@ -662,10 +683,11 @@ impl NativeClient {
     }
 
     fn connection_lost(&self, py: Python<'_>, _exc: Py<PyAny>) {
+        let _ = self.flush_pending_callbacks(py);
         let pending = {
             let mut state = self.state.borrow_mut();
             state.closed = true;
-            state.transport = None;
+            state.release_references();
             state.take_pending()
         };
         Self::fail_pending(py, pending, "Connection lost");
@@ -942,6 +964,23 @@ impl NativeClient {
     }
 
     #[getter]
+    fn close_received_code(&self) -> Option<u16> {
+        self.state.borrow().close_received_code
+    }
+    #[getter]
+    fn close_received_reason(&self) -> Option<String> {
+        self.state.borrow().close_received_reason.clone()
+    }
+    #[getter]
+    fn close_sent_code(&self) -> Option<u16> {
+        self.state.borrow().close_sent_code
+    }
+    #[getter]
+    fn close_sent_reason(&self) -> Option<String> {
+        self.state.borrow().close_sent_reason.clone()
+    }
+
+    #[getter]
     fn close_code(&self) -> Option<u16> {
         self.state.borrow().close_code
     }
@@ -1161,34 +1200,28 @@ impl NativeClient {
 
     fn close(&self, py: Python<'_>) -> PyResult<()> {
         let mut state = self.state.borrow_mut();
-        if state.closed {
-            return Ok(());
-        }
+        let was_closed = state.closed;
         state.closed = true;
         // Pull Py refs out and drop them at the end of this call so the event
         // loop sees the transport's refcount go to zero promptly. Some loop
         // implementations (rloop 0.2) wedge on subsequent connects if these
         // references linger.
         let transport = state.transport.take();
-        state.transport_write = None;
-        state.loop_ref = None;
-        state.on_message = None;
-        state.create_future = None;
-        state.wait_for = None;
-        let write_queue = std::mem::take(&mut state.write_queue);
+        state.release_references();
         let pending = state.take_pending();
         drop(state);
         Self::fail_pending(py, pending, "Connection closed by client");
         // All mutex-guarded references are gone; drop pending writes and then
         // issue the close frame + transport.close() on the surviving transport ref.
-        drop(write_queue);
         if let Some(t) = transport {
             let close_frame: [u8; 6] = [
                 0x88, 0x80, // FIN | opcode=8, masked, length=0
                 0, 0, 0, 0, // mask key (payload empty so mask value immaterial)
             ];
             let tb = t.bind(py);
-            let _ = tb.call_method1("write", (PyBytes::new(py, &close_frame),));
+            if !was_closed {
+                let _ = tb.call_method1("write", (PyBytes::new(py, &close_frame),));
+            }
             let _ = tb.call_method0("close");
         }
         Ok(())
@@ -1297,7 +1330,7 @@ impl NativeClient {
         }
         if let ScanOutcome::Stopped { .. } = outcome {
             if let Some((pending, transport)) = close_effects {
-                Self::apply_peer_close(py, pending, transport);
+                self.apply_peer_close(py, pending, transport);
             }
         }
         Ok(outcome)
@@ -1508,11 +1541,12 @@ impl NativeClient {
         let handshake = { self.state.borrow_mut().protocol_core().process_handshake() };
         match handshake {
             HandshakeOutcome::Pending => return Ok(()),
-            HandshakeOutcome::Rejected => {
+            HandshakeOutcome::Rejected { status_code } => {
                 let future = { self.state.borrow_mut().handshake_fut.take() };
                 if let Some(future) = future {
                     let error = PyConnectionError::new_err("WebSocket handshake failed");
-                    let _ = future.bind(py).call_method1("set_exception", (error,));
+                    error.value(py).setattr("status_code", status_code)?;
+                    Self::set_future_exception(py, future.bind(py), error);
                 }
                 return Ok(());
             }
@@ -1594,7 +1628,7 @@ impl NativeClient {
                     let mut state = self.state.borrow_mut();
                     Self::begin_peer_close(py, &mut state, code, reason)
                 };
-                Self::apply_peer_close(py, pending, transport);
+                self.apply_peer_close(py, pending, transport);
                 Ok(EventFlow::Stop)
             }
             ProtocolEvent::ProtocolError { code, reason } => {
@@ -1602,10 +1636,19 @@ impl NativeClient {
                     let mut state = self.state.borrow_mut();
                     Self::begin_protocol_error(py, &mut state, code, reason)
                 };
+                let _ = self.flush_pending_callbacks(py);
+                self.state.borrow_mut().release_references();
                 Self::fail_pending(py, pending, reason);
                 if let Some(transport) = transport {
                     let transport = transport.bind(py);
-                    let _ = transport.call_method1("write", (PyBytes::new(py, &frame),));
+                    if transport
+                        .call_method1("write", (PyBytes::new(py, &frame),))
+                        .is_ok()
+                    {
+                        let mut state = self.state.borrow_mut();
+                        state.close_sent_code = Some(code);
+                        state.close_sent_reason = Some(String::new());
+                    }
                     let _ = transport.call_method0("close");
                 }
                 Ok(EventFlow::Stop)
@@ -1698,6 +1741,8 @@ impl NativeClient {
         code: Option<u16>,
         reason: Option<String>,
     ) -> (VecDeque<Py<PyAny>>, Option<Py<PyAny>>) {
+        state.close_received_code = code;
+        state.close_received_reason = reason.clone();
         if code.is_some() {
             state.close_code = code;
             state.close_reason = reason;
@@ -1709,10 +1754,13 @@ impl NativeClient {
     }
 
     fn apply_peer_close(
+        &self,
         py: Python<'_>,
         pending: VecDeque<Py<PyAny>>,
         transport: Option<Py<PyAny>>,
     ) {
+        let _ = self.flush_pending_callbacks(py);
+        self.state.borrow_mut().release_references();
         Self::fail_pending(py, pending, "Connection closed by peer");
         if let Some(transport) = transport {
             let _ = transport.bind(py).call_method0("close");

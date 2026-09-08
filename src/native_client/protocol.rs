@@ -33,7 +33,9 @@ pub(crate) enum HandshakeOutcome {
         subprotocol: Option<String>,
         compression_enabled: bool,
     },
-    Rejected,
+    Rejected {
+        status_code: Option<u16>,
+    },
 }
 
 pub(crate) enum ProtocolEvent {
@@ -67,15 +69,31 @@ impl ProtocolCore<'_> {
             return HandshakeOutcome::Pending;
         };
         let headers = String::from_utf8_lossy(&self.buf[..end]);
+        let mut lines = headers.lines();
+        let mut status_parts = lines.next().unwrap_or("").split_whitespace();
+        let valid_version = status_parts.next() == Some("HTTP/1.1");
+        let status_code = status_parts
+            .next()
+            .and_then(|value| value.parse::<u16>().ok());
+        let mut upgrade = false;
+        let mut connection = false;
+        let mut accept_count = 0;
         let mut matched = false;
         let mut subprotocol = None;
         let mut deflate_accepted = false;
-        for line in headers.lines() {
+        for line in lines {
             let Some((name, value)) = line.split_once(':') else {
                 continue;
             };
             if name.eq_ignore_ascii_case("sec-websocket-accept") {
-                matched |= value.contains(self.expected_accept);
+                accept_count += 1;
+                matched = value.trim() == self.expected_accept;
+            } else if name.eq_ignore_ascii_case("upgrade") {
+                upgrade |= value.trim().eq_ignore_ascii_case("websocket");
+            } else if name.eq_ignore_ascii_case("connection") {
+                connection |= value
+                    .split(',')
+                    .any(|token| token.trim().eq_ignore_ascii_case("upgrade"));
             } else if name.eq_ignore_ascii_case("sec-websocket-protocol") {
                 subprotocol = Some(value.trim().to_string());
             } else if name.eq_ignore_ascii_case("sec-websocket-extensions") {
@@ -83,8 +101,14 @@ impl ProtocolCore<'_> {
             }
         }
         self.buf.advance(end);
-        if !matched {
-            return HandshakeOutcome::Rejected;
+        if !valid_version
+            || status_code != Some(101)
+            || !upgrade
+            || !connection
+            || !matched
+            || accept_count != 1
+        {
+            return HandshakeOutcome::Rejected { status_code };
         }
         *self.handshake_done = true;
         self.compression_enabled &= deflate_accepted;

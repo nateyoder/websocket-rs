@@ -60,3 +60,25 @@ async def handler():
 - You're testing a regression and want to compare.
 
 Everyone else should migrate.
+
+### Native connection diagnostics and teardown
+
+Native clients validate HTTP/1.1 status 101, the Upgrade and Connection headers,
+and an exact, single Sec-WebSocket-Accept header. Rejected HTTP upgrades raise
+`ConnectionError` with a `status_code` attribute (an integer when the status line
+can be parsed, otherwise `None`). Failed, timed-out, and cancelled connection
+attempts close their transport.
+
+`close_received_code` and `close_received_reason` describe an actual received
+Close frame. `close_sent_code` and `close_sent_reason` describe a Close frame
+successfully submitted to the transport; a local protocol error currently sends
+the code with an empty reason. `None` means no code/reason is known, including
+bare EOF and the empty local Close frame. These fields do not synthesize 1006 or
+claim a Close was received when only a local failure occurred. Existing
+`close_code` / `close_reason` retain their compatibility behavior.
+
+Final data callbacks run before peer-close teardown, including data and Close
+frames arriving in one read. All terminal paths release cached transport, loop,
+and callback references. Native clients remain thread-affine: close and dispose
+them on their owning event-loop thread, and do not retain them in exception
+tracebacks that will be collected on another thread.
