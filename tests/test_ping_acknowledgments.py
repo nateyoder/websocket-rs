@@ -1,0 +1,498 @@
+"""Controlled wire peers for caller-owned native Ping acknowledgment deadlines."""
+
+import asyncio
+import base64
+import contextlib
+import gc
+import hashlib
+import ssl
+import subprocess
+import sys
+
+import pytest
+
+from websocket_rs import connect
+
+
+def frame(opcode, payload=b""):
+    assert len(payload) <= 125
+    return bytes([opcode, len(payload)]) + payload
+
+
+async def read_frame(reader):
+    first, length = await reader.readexactly(2)
+    assert length & 128, "client frames must be masked"
+    length &= 127
+    assert length <= 125
+    mask = await reader.readexactly(4)
+    payload = await reader.readexactly(length)
+    return first, bytes(value ^ mask[i % 4] for i, value in enumerate(payload))
+
+
+@pytest.fixture(scope="module")
+def tls_contexts(tmp_path_factory):
+    directory = tmp_path_factory.mktemp("ping-tls")
+    cert, key = directory / "cert.pem", directory / "key.pem"
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+         "-keyout", str(key), "-out", str(cert), "-subj", "/CN=localhost"],
+        check=True, capture_output=True,
+    )
+    server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server.load_cert_chain(cert, key)
+    client = ssl.create_default_context(cafile=str(cert))
+    client.check_hostname = False
+    return server, client
+
+
+@pytest.fixture(params=["asyncio", "uvloop"])
+def loop_factory(request):
+    if request.param == "uvloop":
+        return pytest.importorskip("uvloop").new_event_loop
+    return asyncio.SelectorEventLoop
+
+
+@contextlib.asynccontextmanager
+async def peer(tls):
+    connected = asyncio.get_running_loop().create_future()
+    finished = asyncio.Event()
+
+    async def accept(reader, writer):
+        try:
+            request = await reader.readuntil(b"\r\n\r\n")
+            headers = dict(line.split(b":", 1) for line in request.split(b"\r\n")[1:] if b":" in line)
+            key = headers[b"Sec-WebSocket-Key"].strip()
+            accept_key = base64.b64encode(hashlib.sha1(key + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest())
+            writer.write(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept_key + b"\r\n\r\n")
+            await writer.drain()
+            connected.set_result((reader, writer))
+            await finished.wait()
+        finally:
+            writer.close()
+            with contextlib.suppress(ConnectionError):
+                await writer.wait_closed()
+
+    server = await asyncio.start_server(accept, "127.0.0.1", 0, ssl=tls[0] if tls else None)
+    port = server.sockets[0].getsockname()[1]
+    ws = await connect(f"{'wss' if tls else 'ws'}://127.0.0.1:{port}", **({"ssl_context": tls[1]} if tls else {}))
+    reader, writer = await connected
+    try:
+        yield ws, reader, writer
+    finally:
+        ws.close()
+        finished.set()
+        server.close()
+        await server.wait_closed()
+        await asyncio.sleep(0.01)
+
+
+@pytest.mark.parametrize("secure", [False, True])
+def test_correlated_acknowledgments(loop_factory, tls_contexts, secure):
+    async def scenario():
+        async with peer(tls_contexts if secure else None) as (ws, reader, writer):
+            # The peer responds before the caller starts awaiting the Future.
+            first = ws.ping_waiter(b"first")
+            assert await read_frame(reader) == (0x89, b"first")
+            writer.write(frame(0x8A, b"first"))
+            await asyncio.sleep(0.01)
+            assert first.done()
+            assert await first is None
+            a, b = ws.ping_waiter(b"a"), ws.ping_waiter(b"b")
+            with pytest.raises(ValueError, match="outstanding"):
+                ws.ping_waiter(b"a")
+            assert await read_frame(reader) == (0x89, b"a")
+            assert await read_frame(reader) == (0x89, b"b")
+            writer.write(frame(0x8A, b"wrong") + frame(0x8A, b"b"))
+            await asyncio.wait_for(b, 1)
+            assert not a.done()
+            # Force slow fragmented-message parsing with interleaved controls.
+            writer.write(frame(0x02, b"hello") + frame(0x89, b"server") + frame(0x8A, b"a") + frame(0x80, b"world"))
+            await asyncio.wait_for(a, 1)
+            assert bytes(await asyncio.wait_for(ws.recv(), 1)) == b"helloworld"
+            assert await read_frame(reader) == (0x8A, b"server")
+            assert ws.ping(b"legacy") is None
+            assert await read_frame(reader) == (0x89, b"legacy")
+            with pytest.raises(ValueError, match="125"):
+                ws.ping_waiter(b"x" * 126)
+            maximum = ws.ping_waiter(b"m" * 125)
+            assert await read_frame(reader) == (0x89, b"m" * 125)
+            writer.write(frame(0x8A, b"m" * 125))
+            await asyncio.wait_for(maximum, 1)
+            empty = ws.ping_waiter()
+            assert await read_frame(reader) == (0x89, b"")
+            writer.write(frame(0x8A))
+            await asyncio.wait_for(empty, 1)
+    with asyncio.Runner(loop_factory=loop_factory) as runner:
+        runner.run(asyncio.wait_for(scenario(), 5))
+
+
+@pytest.mark.parametrize("secure", [False, True])
+@pytest.mark.parametrize("streaming", [False, True])
+def test_deadline_and_cancellation(loop_factory, tls_contexts, secure, streaming):
+    async def scenario():
+        async with peer(tls_contexts if secure else None) as (ws, reader, writer):
+            messages = []
+
+            async def receive():
+                while True:
+                    messages.append(bytes(await ws.recv()))
+
+            async def stream():
+                while True:
+                    writer.write(frame(0x82, b"market") + frame(0x8A, b"unsolicited"))
+                    await asyncio.sleep(0.005)
+
+            receiver = asyncio.create_task(receive())
+            sender = asyncio.create_task(stream()) if streaming else None
+            try:
+                missing = ws.ping_waiter(b"missing")
+                assert await read_frame(reader) == (0x89, b"missing")
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(missing, 0.05)
+                assert missing.cancelled()
+                if streaming:
+                    assert len(messages) > 1
+                assert not receiver.done()
+                canceled = ws.ping_waiter(b"cancel")
+                assert await read_frame(reader) == (0x89, b"cancel")
+                canceled.cancel()
+                next_probe = ws.ping_waiter(b"next")
+                assert await read_frame(reader) == (0x89, b"next")
+                writer.write(frame(0x8A, b"missing") + frame(0x8A, b"cancel"))
+                await asyncio.sleep(0.01)
+                assert not next_probe.done()
+                writer.write(frame(0x8A, b"next") + frame(0x82, b"still usable"))
+                await asyncio.wait_for(next_probe, 1)
+                await asyncio.sleep(0.01)
+                assert b"still usable" in messages
+                assert not receiver.done()
+            finally:
+                for task in (receiver, sender):
+                    if task:
+                        task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await task
+    with asyncio.Runner(loop_factory=loop_factory) as runner:
+        runner.run(asyncio.wait_for(scenario(), 5))
+
+
+@pytest.mark.parametrize("secure", [False, True])
+@pytest.mark.parametrize("closure", ["local", "peer", "abort", "protocol"])
+def test_closure_fails_waiters(loop_factory, tls_contexts, secure, closure):
+    async def scenario():
+        async with peer(tls_contexts if secure else None) as (ws, reader, writer):
+            waits = [ws.ping_waiter(b"a"), ws.ping_waiter(b"b")]
+            await read_frame(reader)
+            await read_frame(reader)
+            if closure == "local":
+                ws.close()
+            elif closure == "peer":
+                writer.write(frame(0x88, b"\x03\xe8"))
+            elif closure == "protocol":
+                writer.write(frame(0x80, b"invalid continuation"))
+            else:
+                writer.transport.abort()
+            for wait in waits:
+                with pytest.raises(ConnectionError):
+                    await asyncio.wait_for(wait, 1)
+            with pytest.raises(ConnectionError):
+                ws.ping_waiter(b"after close")
+    with asyncio.Runner(loop_factory=loop_factory) as runner:
+        runner.run(asyncio.wait_for(scenario(), 5))
+
+
+def test_cancellation_reclaims_waiter_without_more_traffic(loop_factory):
+    import gc
+    import weakref
+
+    async def scenario():
+        async with peer(None) as (ws, reader, _writer):
+            probe = ws.ping_waiter(b"cancel and release")
+            await read_frame(reader)
+            reference = weakref.ref(probe)
+            probe.cancel()
+            del probe
+            await asyncio.sleep(0)
+            gc.collect()
+            assert reference() is None
+            # A queued old cleanup must not remove a newer probe with same key.
+            old = ws.ping_waiter(b"reuse")
+            old.cancel()
+            replacement = ws.ping_waiter(b"reuse")
+            await asyncio.sleep(0)
+            ws.data_received(frame(0x8A, b"reuse"))
+            await asyncio.wait_for(replacement, 1)
+    with asyncio.Runner(loop_factory=loop_factory) as runner:
+        runner.run(asyncio.wait_for(scenario(), 5))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="native socket send optimization is Unix-only")
+@pytest.mark.parametrize("control", ["waiter", "ping", "pong", "automatic", "fragmented"])
+@pytest.mark.parametrize("prefix", [0, 3])
+def test_buffered_control_preserves_application_wire_order(loop_factory, control, prefix):
+    import socket
+
+    async def scenario():
+        async with peer(None) as (ws, _reader, _writer):
+            sending, receiving = socket.socketpair()
+            receiving.setblocking(False)
+
+            class BufferingTransport:
+                def __init__(self):
+                    self.pending = bytearray()
+
+                def get_extra_info(self, name):
+                    return sending if name == "socket" else None
+
+                def get_write_buffer_size(self):
+                    return len(self.pending)
+
+                def write(self, data):
+                    if not self.pending:
+                        sending.sendall(data[:prefix])
+                        data = data[prefix:]
+                    self.pending.extend(data)
+
+                def close(self):
+                    pass
+
+            transport = BufferingTransport()
+            ws.connection_made(transport)
+            try:
+                ws.send(b"warm cache")
+                assert receiving.recv(4096)
+                probe = None
+                if control == "waiter":
+                    probe = ws.ping_waiter(b"control")
+                elif control == "ping":
+                    ws.ping(b"control")
+                elif control == "pong":
+                    ws.pong(b"control")
+                else:
+                    data = frame(0x89, b"control")
+                    if control == "fragmented":
+                        data = frame(0x02, b"start") + data
+                    ws.data_received(data)
+                queued_control = bytes(transport.pending)
+                assert queued_control
+                if prefix:
+                    assert len(receiving.recv(4096)) == prefix
+                ws.send(b"application")
+                with pytest.raises(BlockingIOError):
+                    receiving.recv(4096)
+                assert transport.pending.startswith(queued_control)
+                assert len(transport.pending) > len(queued_control)
+                if probe:
+                    probe.cancel()
+            finally:
+                ws.close()
+                sending.close()
+                receiving.close()
+    with asyncio.Runner(loop_factory=loop_factory) as runner:
+        runner.run(asyncio.wait_for(scenario(), 5))
+
+
+@pytest.mark.parametrize("reentrant_close", [False, True])
+def test_ping_write_failure_terminates_pending_probes(loop_factory, reentrant_close):
+    async def scenario():
+        async with peer(None) as (ws, _reader, _writer):
+            class FailingTransport:
+                writes = 0
+
+                def get_extra_info(self, _name):
+                    return None
+
+                def write(self, _data):
+                    self.writes += 1
+                    if self.writes > 1:
+                        if reentrant_close:
+                            ws.connection_lost(ConnectionError("lost during write"))
+                        raise OSError("write failed")
+
+                def close(self):
+                    pass
+
+            ws.connection_made(FailingTransport())
+            pending = ws.ping_waiter(b"pending")
+            with pytest.raises(ConnectionError, match="Ping write failed"):
+                ws.ping_waiter(b"failed")
+            with pytest.raises(ConnectionError):
+                await pending
+            assert ws.closed
+    with asyncio.Runner(loop_factory=loop_factory) as runner:
+        runner.run(asyncio.wait_for(scenario(), 5))
+
+
+class _ProbeFuture(asyncio.Future):
+    failure = None
+    on_done = None
+
+    def remove_done_callback(self, callback):
+        if self.failure == "remove_done_callback":
+            raise RuntimeError("injected callback removal failure")
+        return super().remove_done_callback(callback)
+
+    def done(self):
+        if self.on_done is not None:
+            hook, self.on_done = self.on_done, None
+            hook()
+        if self.failure == "done":
+            raise RuntimeError("injected done failure")
+        return super().done()
+
+    def set_result(self, value):
+        if self.failure == "set_result":
+            raise RuntimeError("injected set_result failure")
+        return super().set_result(value)
+
+
+@contextlib.contextmanager
+def _probe_futures():
+    loop = asyncio.get_running_loop()
+    original = loop.create_future
+    loop.create_future = lambda: _ProbeFuture(loop=loop)
+    try:
+        yield
+    finally:
+        loop.create_future = original
+
+
+@pytest.mark.parametrize("failure", ["remove_done_callback", "done", "set_result"])
+@pytest.mark.parametrize("fragmented", [False, True])
+def test_ack_failure_does_not_interrupt_siblings_or_control_traffic(loop_factory, failure, fragmented):
+    async def scenario():
+        with _probe_futures():
+            async with peer(None) as (ws, reader, writer):
+                first = ws.ping_waiter(b"first")
+                second = ws.ping_waiter(b"second")
+                closing = ws.ping_waiter(b"closing")
+                for _ in range(3):
+                    await read_frame(reader)
+                first.failure = failure
+                data = frame(0x02, b"start") if fragmented else b""
+                data += frame(0x8A, b"first") + frame(0x8A, b"second") + frame(0x89, b"server")
+                data += frame(0x80, b"end") if fragmented else frame(0x82, b"application")
+                data += frame(0x88, b"\x03\xe8")
+                ws.data_received(data)
+                assert asyncio.Future.done(first)
+                if failure == "remove_done_callback":
+                    assert await first is None
+                else:
+                    with pytest.raises(RuntimeError, match="injected") as caught:
+                        await first
+                    caught.value.__traceback__ = None
+                assert await asyncio.wait_for(second, 1) is None
+                assert bytes(await ws.recv()) == (b"startend" if fragmented else b"application")
+                with pytest.raises(ConnectionError):
+                    await asyncio.wait_for(closing, 1)
+                assert await read_frame(reader) == (0x8A, b"server")
+                assert ws.closed
+    try:
+        with asyncio.Runner(loop_factory=loop_factory) as runner:
+            runner.run(asyncio.wait_for(scenario(), 5))
+    finally:
+        # Injected exception/callback cycles must die on the client-owning thread.
+        gc.collect()
+
+
+def _exercise_duplicate_reentry(mode, loop_name):
+    async def scenario():
+        with _probe_futures():
+            async with peer(None) as (ws, _reader, _writer):
+                original = ws.ping_waiter(b"same")
+                replacements = []
+                if mode == "read":
+                    original.on_done = lambda: ws.is_open
+                elif mode == "close":
+                    original.cancel()
+                    original.on_done = ws.close
+                else:
+                    original.cancel()
+                    original.on_done = lambda: replacements.append(ws.ping_waiter(b"same"))
+                with pytest.raises(ConnectionError if mode == "close" else ValueError):
+                    ws.ping_waiter(b"same")
+                if replacements:
+                    ws.data_received(frame(0x8A, b"same"))
+                    assert await asyncio.wait_for(replacements[0], 1) is None
+                original.cancel()
+    factory = asyncio.SelectorEventLoop
+    if loop_name == "uvloop":
+        import uvloop
+        factory = uvloop.new_event_loop
+    with asyncio.Runner(loop_factory=factory) as runner:
+        runner.run(asyncio.wait_for(scenario(), 5))
+
+
+@pytest.mark.parametrize("mode", ["read", "close", "replace"])
+@pytest.mark.parametrize("loop_name", ["asyncio", "uvloop"])
+def test_duplicate_check_allows_future_reentry(mode, loop_name):
+    if loop_name == "uvloop":
+        pytest.importorskip("uvloop")
+    # A RefCell reentrancy regression aborts a release extension; isolate it.
+    code = (
+        "from tests.test_ping_acknowledgments import _exercise_duplicate_reentry; "
+        f"_exercise_duplicate_reentry({mode!r}, {loop_name!r})"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _exercise_creation_reentry(stage, mode, loop_name):
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        original_factory = loop.create_future
+        hook = None
+        replacements = []
+
+        def reenter():
+            nonlocal hook
+            callback, hook = hook, None
+            if callback is not None:
+                callback()
+
+        class CreationFuture(asyncio.Future):
+            def add_done_callback(self, callback, *, context=None):
+                if stage == "add_done_callback":
+                    reenter()
+                return super().add_done_callback(callback, context=context)
+
+        def create_future():
+            if stage == "create_future":
+                reenter()
+            return CreationFuture(loop=loop)
+
+        loop.create_future = create_future
+        try:
+            async with peer(None) as (ws, _reader, _writer):
+                hook = ws.close if mode == "close" else lambda: replacements.append(ws.ping_waiter(b"same"))
+                with pytest.raises(ConnectionError if mode == "close" else ValueError):
+                    ws.ping_waiter(b"same")
+                if mode == "close":
+                    assert ws.closed
+                else:
+                    assert len(replacements) == 1
+                    ws.data_received(frame(0x8A, b"same"))
+                    assert await asyncio.wait_for(replacements[0], 1) is None
+        finally:
+            loop.create_future = original_factory
+
+    factory = asyncio.SelectorEventLoop
+    if loop_name == "uvloop":
+        import uvloop
+        factory = uvloop.new_event_loop
+    with asyncio.Runner(loop_factory=factory) as runner:
+        runner.run(asyncio.wait_for(scenario(), 5))
+
+
+@pytest.mark.parametrize("stage", ["create_future", "add_done_callback"])
+@pytest.mark.parametrize("mode", ["close", "replace"])
+@pytest.mark.parametrize("loop_name", ["asyncio", "uvloop"])
+def test_creation_checks_allow_future_reentry(stage, mode, loop_name):
+    if loop_name == "uvloop":
+        pytest.importorskip("uvloop")
+    code = (
+        "from tests.test_ping_acknowledgments import _exercise_creation_reentry; "
+        f"_exercise_creation_reentry({stage!r}, {mode!r}, {loop_name!r})"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr

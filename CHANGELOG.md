@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 0.7.11
+
+### Added
+
+- Native async `ping_waiter(payload)` sends a protocol Ping and returns an
+  `asyncio.Future[None]` for its matching Pong. Caller-owned deadlines work on
+  quiet or streaming TCP/TLS connections; distinct concurrent probes correlate
+  independently, cancellation releases waiters, and closure fails pending probes.
+  Existing `ping()` remains fire-and-forget. Public type declarations and usage
+  documentation are included.
+
+### Fixed
+
+- Buffered control writes invalidate the native-send cache so later application
+  frames cannot bypass queued Ping/Pong bytes.
+- Custom Future failures do not interrupt sibling acknowledgments or control
+  traffic; duplicate checks release the client-state borrow before Python calls
+  and preserve newer probes created by reentrant callbacks.
+
+### Performance
+
+- Lazy acknowledgment state, indexed cancellation cleanup and direct frame
+  encoding avoid full-registry scans and unnecessary copies. Benchmarks and
+  measured CPU, latency and memory tradeoffs are in `docs/PING_ACK_PERFORMANCE.md`.
+
 ## [0.7.10] - 2026-09-02
 
 ### Fixed

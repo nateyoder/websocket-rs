@@ -1,0 +1,35 @@
+schema_version = 2
+data_path = ".tommie"
+
+[host]
+environment = ["PATH", "HOME"]
+
+[evidence.commands.test]
+argv = ["bash", "scripts/verify.sh"]
+cwd = "."
+timeout_seconds = 900
+output_limit_bytes = 1048576
+
+[github]
+repository = "nateyoder/websocket-rs"
+base = "main"
+required_checks = [
+    { app_id = 15368, workflow_id = 353417867, job = "Lint" },
+    { app_id = 15368, workflow_id = 353417867, job = "Build wheels" },
+    { app_id = 15368, workflow_id = 353417867, job = "Test Python 3.12 on ubuntu-latest" },
+    { app_id = 15368, workflow_id = 353417867, job = "Test Python 3.12 on ubuntu-24.04-arm" },
+    { app_id = 15368, workflow_id = 353417867, job = "Test Python 3.13 on ubuntu-latest" },
+    { app_id = 15368, workflow_id = 353417867, job = "Test Python 3.13 on ubuntu-24.04-arm" },
+    { app_id = 15368, workflow_id = 353417870, job = "Test Python 3.12 on ubuntu-latest" },
+    { app_id = 15368, workflow_id = 353417870, job = "Test Python 3.12 on ubuntu-24.04-arm" },
+    { app_id = 15368, workflow_id = 353417870, job = "Test Python 3.12 on windows-latest" },
+    { app_id = 15368, workflow_id = 353417870, job = "Test Python 3.12 on macos-latest" },
+    { app_id = 15368, workflow_id = 353417870, job = "Test Python 3.13 on ubuntu-latest" },
+    { app_id = 15368, workflow_id = 353417870, job = "Test Python 3.13 on ubuntu-24.04-arm" },
+    { app_id = 15368, workflow_id = 353417870, job = "Test Python 3.13 on windows-latest" },
+    { app_id = 15368, workflow_id = 353417870, job = "Test Python 3.13 on macos-latest" },
+    { app_id = 15368, workflow_id = 353417870, job = "Test Python 3.14 on ubuntu-latest" },
+    { app_id = 15368, workflow_id = 353417870, job = "Test Python 3.14 on ubuntu-24.04-arm" },
+    { app_id = 15368, workflow_id = 353417870, job = "Test Python 3.14 on windows-latest" },
+    { app_id = 15368, workflow_id = 353417870, job = "Test Python 3.14 on macos-latest" },
+]

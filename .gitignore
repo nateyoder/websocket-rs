@@ -58,3 +58,6 @@ monitor_and_merge.sh
 
 # TLS test certs (generated via `make tls-certs`)
 tests/certs/
+
+# TOMMIE local evidence and workflow state
+.tommie/

@@ -39,6 +39,7 @@ pub(crate) enum HandshakeOutcome {
 pub(crate) enum ProtocolEvent {
     Message(Bytes),
     SendPong(Bytes),
+    Pong(Bytes),
     Close {
         code: Option<u16>,
         reason: Option<String>,
@@ -176,7 +177,10 @@ impl ProtocolCore<'_> {
                     self.buf.advance(hdr);
                     return Some(ProtocolEvent::SendPong(self.buf.split_to(plen).freeze()));
                 }
-                OP_PONG => self.buf.advance(total),
+                OP_PONG => {
+                    self.buf.advance(hdr);
+                    return Some(ProtocolEvent::Pong(self.buf.split_to(plen).freeze()));
+                }
                 _ => self.buf.advance(total),
             }
         }
