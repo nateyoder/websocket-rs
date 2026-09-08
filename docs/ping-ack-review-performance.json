@@ -1,0 +1,329 @@
+{
+  "rounds": 15,
+  "summary": {
+    "probe_cpu_ns_per_ack": {
+      "singleton": 474.96666666666664,
+      "vector": 509.76666666666665,
+      "paired_ratio": 0.9347679438747976,
+      "ci95": [
+        0.9076026455372929,
+        0.962576851109329
+      ]
+    },
+    "application_cpu_ns_per_exchange": {
+      "singleton": 315.8666666666667,
+      "vector": 312.8,
+      "paired_ratio": 1.0097917955060813,
+      "ci95": [
+        0.9909420289855071,
+        1.0209619067886784
+      ]
+    }
+  },
+  "samples": {
+    "singleton": [
+      {
+        "application_cpu_ns_per_exchange": 307.9,
+        "probe_cpu_ns_per_ack": 462.0,
+        "registration_ns_per_probe_32": 312.5,
+        "registration_ns_per_probe_256": 300.78125,
+        "registration_ns_per_probe_1024": 337.890625,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34324480
+      },
+      {
+        "application_cpu_ns_per_exchange": 317.4,
+        "probe_cpu_ns_per_ack": 489.56666666666666,
+        "registration_ns_per_probe_32": 312.5,
+        "registration_ns_per_probe_256": 312.5,
+        "registration_ns_per_probe_1024": 346.6796875,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34521088
+      },
+      {
+        "application_cpu_ns_per_exchange": 309.96666666666664,
+        "probe_cpu_ns_per_ack": 471.9,
+        "registration_ns_per_probe_32": 281.25,
+        "registration_ns_per_probe_256": 312.5,
+        "registration_ns_per_probe_1024": 337.890625,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34226176
+      },
+      {
+        "application_cpu_ns_per_exchange": 325.1333333333333,
+        "probe_cpu_ns_per_ack": 480.1333333333333,
+        "registration_ns_per_probe_32": 343.75,
+        "registration_ns_per_probe_256": 335.9375,
+        "registration_ns_per_probe_1024": 351.5625,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 33669120
+      },
+      {
+        "application_cpu_ns_per_exchange": 365.6666666666667,
+        "probe_cpu_ns_per_ack": 458.93333333333334,
+        "registration_ns_per_probe_32": 781.25,
+        "registration_ns_per_probe_256": 816.40625,
+        "registration_ns_per_probe_1024": 627.9296875,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34471936
+      },
+      {
+        "application_cpu_ns_per_exchange": 326.56666666666666,
+        "probe_cpu_ns_per_ack": 496.2,
+        "registration_ns_per_probe_32": 281.25,
+        "registration_ns_per_probe_256": 300.78125,
+        "registration_ns_per_probe_1024": 333.0078125,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34275328
+      },
+      {
+        "application_cpu_ns_per_exchange": 400.46666666666664,
+        "probe_cpu_ns_per_ack": 544.2,
+        "registration_ns_per_probe_32": 437.5,
+        "registration_ns_per_probe_256": 316.40625,
+        "registration_ns_per_probe_1024": 334.9609375,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 33996800
+      },
+      {
+        "application_cpu_ns_per_exchange": 307.3666666666667,
+        "probe_cpu_ns_per_ack": 485.4,
+        "registration_ns_per_probe_32": 312.5,
+        "registration_ns_per_probe_256": 332.03125,
+        "registration_ns_per_probe_1024": 336.9140625,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34193408
+      },
+      {
+        "application_cpu_ns_per_exchange": 302.1666666666667,
+        "probe_cpu_ns_per_ack": 461.9,
+        "registration_ns_per_probe_32": 343.75,
+        "registration_ns_per_probe_256": 312.5,
+        "registration_ns_per_probe_1024": 340.8203125,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 33849344
+      },
+      {
+        "application_cpu_ns_per_exchange": 311.3333333333333,
+        "probe_cpu_ns_per_ack": 474.96666666666664,
+        "registration_ns_per_probe_32": 312.5,
+        "registration_ns_per_probe_256": 320.3125,
+        "registration_ns_per_probe_1024": 329.1015625,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 33849344
+      },
+      {
+        "application_cpu_ns_per_exchange": 319.8333333333333,
+        "probe_cpu_ns_per_ack": 466.1333333333333,
+        "registration_ns_per_probe_32": 312.5,
+        "registration_ns_per_probe_256": 324.21875,
+        "registration_ns_per_probe_1024": 333.0078125,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34439168
+      },
+      {
+        "application_cpu_ns_per_exchange": 315.8666666666667,
+        "probe_cpu_ns_per_ack": 487.6,
+        "registration_ns_per_probe_32": 312.5,
+        "registration_ns_per_probe_256": 320.3125,
+        "registration_ns_per_probe_1024": 334.9609375,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 33898496
+      },
+      {
+        "application_cpu_ns_per_exchange": 307.93333333333334,
+        "probe_cpu_ns_per_ack": 467.06666666666666,
+        "registration_ns_per_probe_32": 343.75,
+        "registration_ns_per_probe_256": 312.5,
+        "registration_ns_per_probe_1024": 356.4453125,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34242560
+      },
+      {
+        "application_cpu_ns_per_exchange": 304.8333333333333,
+        "probe_cpu_ns_per_ack": 458.8333333333333,
+        "registration_ns_per_probe_32": 312.5,
+        "registration_ns_per_probe_256": 316.40625,
+        "registration_ns_per_probe_1024": 334.9609375,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34127872
+      },
+      {
+        "application_cpu_ns_per_exchange": 319.96666666666664,
+        "probe_cpu_ns_per_ack": 506.7,
+        "registration_ns_per_probe_32": 343.75,
+        "registration_ns_per_probe_256": 312.5,
+        "registration_ns_per_probe_1024": 351.5625,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 33718272
+      }
+    ],
+    "vector": [
+      {
+        "application_cpu_ns_per_exchange": 306.73333333333335,
+        "probe_cpu_ns_per_ack": 509.03333333333336,
+        "registration_ns_per_probe_32": 375.0,
+        "registration_ns_per_probe_256": 304.6875,
+        "registration_ns_per_probe_1024": 328.125,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34406400
+      },
+      {
+        "application_cpu_ns_per_exchange": 320.1,
+        "probe_cpu_ns_per_ack": 518.7666666666667,
+        "registration_ns_per_probe_32": 312.5,
+        "registration_ns_per_probe_256": 312.5,
+        "registration_ns_per_probe_1024": 342.7734375,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34013184
+      },
+      {
+        "application_cpu_ns_per_exchange": 312.8,
+        "probe_cpu_ns_per_ack": 535.7,
+        "registration_ns_per_probe_32": 437.5,
+        "registration_ns_per_probe_256": 312.5,
+        "registration_ns_per_probe_1024": 334.9609375,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34308096
+      },
+      {
+        "application_cpu_ns_per_exchange": 308.4,
+        "probe_cpu_ns_per_ack": 498.8,
+        "registration_ns_per_probe_32": 312.5,
+        "registration_ns_per_probe_256": 312.5,
+        "registration_ns_per_probe_1024": 333.984375,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34193408
+      },
+      {
+        "application_cpu_ns_per_exchange": 323.53333333333336,
+        "probe_cpu_ns_per_ack": 475.7,
+        "registration_ns_per_probe_32": 812.5,
+        "registration_ns_per_probe_256": 511.71875,
+        "registration_ns_per_probe_1024": 433.59375,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34275328
+      },
+      {
+        "application_cpu_ns_per_exchange": 323.4,
+        "probe_cpu_ns_per_ack": 563.9333333333333,
+        "registration_ns_per_probe_32": 875.0,
+        "registration_ns_per_probe_256": 351.5625,
+        "registration_ns_per_probe_1024": 345.703125,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34078720
+      },
+      {
+        "application_cpu_ns_per_exchange": 347.1666666666667,
+        "probe_cpu_ns_per_ack": 509.76666666666665,
+        "registration_ns_per_probe_32": 1062.5,
+        "registration_ns_per_probe_256": 878.90625,
+        "registration_ns_per_probe_1024": 754.8828125,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34455552
+      },
+      {
+        "application_cpu_ns_per_exchange": 320.1666666666667,
+        "probe_cpu_ns_per_ack": 517.2,
+        "registration_ns_per_probe_32": 343.75,
+        "registration_ns_per_probe_256": 308.59375,
+        "registration_ns_per_probe_1024": 340.8203125,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34111488
+      },
+      {
+        "application_cpu_ns_per_exchange": 310.8333333333333,
+        "probe_cpu_ns_per_ack": 494.1333333333333,
+        "registration_ns_per_probe_32": 437.5,
+        "registration_ns_per_probe_256": 296.875,
+        "registration_ns_per_probe_1024": 332.03125,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34308096
+      },
+      {
+        "application_cpu_ns_per_exchange": 327.6666666666667,
+        "probe_cpu_ns_per_ack": 513.1,
+        "registration_ns_per_probe_32": 281.25,
+        "registration_ns_per_probe_256": 312.5,
+        "registration_ns_per_probe_1024": 333.984375,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34209792
+      },
+      {
+        "application_cpu_ns_per_exchange": 313.26666666666665,
+        "probe_cpu_ns_per_ack": 506.06666666666666,
+        "registration_ns_per_probe_32": 343.75,
+        "registration_ns_per_probe_256": 300.78125,
+        "registration_ns_per_probe_1024": 333.0078125,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34258944
+      },
+      {
+        "application_cpu_ns_per_exchange": 310.6666666666667,
+        "probe_cpu_ns_per_ack": 511.96666666666664,
+        "registration_ns_per_probe_32": 281.25,
+        "registration_ns_per_probe_256": 351.5625,
+        "registration_ns_per_probe_1024": 348.6328125,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34439168
+      },
+      {
+        "application_cpu_ns_per_exchange": 306.56666666666666,
+        "probe_cpu_ns_per_ack": 522.0,
+        "registration_ns_per_probe_32": 281.25,
+        "registration_ns_per_probe_256": 347.65625,
+        "registration_ns_per_probe_1024": 339.84375,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34209792
+      },
+      {
+        "application_cpu_ns_per_exchange": 301.76666666666665,
+        "probe_cpu_ns_per_ack": 498.5,
+        "registration_ns_per_probe_32": 281.25,
+        "registration_ns_per_probe_256": 308.59375,
+        "registration_ns_per_probe_1024": 338.8671875,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34013184
+      },
+      {
+        "application_cpu_ns_per_exchange": 308.8666666666667,
+        "probe_cpu_ns_per_ack": 496.93333333333334,
+        "registration_ns_per_probe_32": 312.5,
+        "registration_ns_per_probe_256": 316.40625,
+        "registration_ns_per_probe_1024": 332.03125,
+        "python_pending_bytes_per_probe": 272.138671875,
+        "python_retained_bytes_after_cancel_4096": 1132,
+        "peak_rss_platform_units": 34078720
+      }
+    ]
+  }
+}

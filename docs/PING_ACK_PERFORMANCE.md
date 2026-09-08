@@ -118,3 +118,21 @@ local TLS certificate with `make tls-certs`. The application harness starts its
 own servers. Repeat its command with `--transport tls` for TLS.
 
 Raw measurements: [ping-ack-performance.json](ping-ack-performance.json).
+
+## Review: singleton versus one Vec
+
+For R1-F4, compared commit `93f8573` with an otherwise identical release build
+that collects every acknowledgment in one `Vec<PendingPing>`. On the same
+Apple Silicon host, ran `tests/bench_ping_ack.py <extension>` in 15 alternating
+process pairs. Raw samples are in `ping-ack-review-performance.json`.
+The actual Pong acknowledgment path measured median 475 ns with the singleton
+slot versus 510 ns with the Vec. The median paired ratio was 0.935 (20,000
+paired bootstrap resamples, seed 1, 95% interval 0.908–0.963), a 6.5% CPU
+reduction. Application-only CPU had ratio 1.010 (0.991–1.021), with no resolved
+change. These are local microbenchmarks, not network latency guarantees.
+
+Retain the singleton slot: it avoids allocating a Vec for the common one-Pong
+batch, and this direct measurement exceeds the review's suggested 2% threshold.
+Application-only echo throughput does not exercise acknowledgment collection.
+This comparison isolates the collection choice before the subsequent review
+correctness fixes; it does not claim a before/after result for those fixes.

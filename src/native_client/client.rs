@@ -25,12 +25,17 @@ pub(crate) struct PendingPing {
 }
 
 impl PendingPing {
-    fn acknowledge(self, py: Python<'_>) -> PyResult<()> {
-        // A normal Pong needs no extra scheduled cleanup callback.
-        self.future
+    fn acknowledge(self, py: Python<'_>) {
+        // Detaching cleanup is an optimization, not a prerequisite for an ack.
+        let _ = self
+            .future
             .bind(py)
-            .call_method1(pyo3::intern!(py, "remove_done_callback"), (self.cleanup,))?;
-        NativeClient::set_future_result(py, self.future.bind(py), py.None())
+            .call_method1(pyo3::intern!(py, "remove_done_callback"), (self.cleanup,));
+        if let Err(error) = NativeClient::set_future_result(py, self.future.bind(py), py.None()) {
+            // A custom Future may reject done()/set_result(). Settle that probe
+            // directly if possible; never strand its siblings or stop parsing.
+            let _ = self.future.bind(py).call_method1("set_exception", (error,));
+        }
     }
 }
 
@@ -1024,34 +1029,41 @@ impl NativeClient {
                 "ping payload exceeds 125 bytes (WS control-frame limit)",
             ));
         }
-        let mut state = self.state.borrow_mut();
+        let state = self.state.borrow();
         if state.closed {
             return Err(PyConnectionError::new_err("WebSocket is closed"));
         }
-        if let Some(pings) = state.pending_pings.as_mut() {
-            if let Some(ping) = pings.get(payload) {
-                if !ping
-                    .future
-                    .bind(py)
-                    .call_method0(pyo3::intern!(py, "done"))?
-                    .extract::<bool>()?
-                {
-                    return Err(PyValueError::new_err("ping payload already outstanding"));
-                }
-                pings.remove(payload);
-            }
-        }
-        let transport = state
-            .transport
+        let existing = state
+            .pending_pings
             .as_ref()
-            .ok_or_else(|| PyConnectionError::new_err("No transport"))?
-            .clone_ref(py);
+            .and_then(|pings| pings.get(payload))
+            .map(|ping| ping.future.clone_ref(py));
         let create_future = state
             .create_future
             .as_ref()
             .ok_or_else(|| PyConnectionError::new_err("No event loop"))?
             .clone_ref(py);
         drop(state);
+        if let Some(existing) = existing {
+            // Loop-provided Futures can override done() and re-enter us.
+            let done = existing
+                .bind(py)
+                .call_method0(pyo3::intern!(py, "done"))?
+                .extract::<bool>()?;
+            let mut state = self.state.borrow_mut();
+            if state.closed {
+                return Err(PyConnectionError::new_err("WebSocket is closed"));
+            }
+            if let Some(pings) = state.pending_pings.as_mut() {
+                if let Some(current) = pings.get(payload) {
+                    if !current.future.bind(py).is(existing.bind(py)) || !done {
+                        return Err(PyValueError::new_err("ping payload already outstanding"));
+                    }
+                    pings.remove(payload);
+                }
+            }
+        }
+
         let future = create_future.bind(py).call0()?.unbind();
         let payload: Arc<[u8]> = Arc::from(payload);
         let cleanup = Py::new(
@@ -1066,6 +1078,28 @@ impl NativeClient {
             (cleanup.clone_ref(py),),
         )?;
         let mut state = self.state.borrow_mut();
+        // Future creation/callback registration above can also re-enter us.
+        let invalid = if state.closed || state.transport.is_none() {
+            Some(PyConnectionError::new_err("WebSocket is closed"))
+        } else if state
+            .pending_pings
+            .as_ref()
+            .is_some_and(|pings| pings.contains_key(payload.as_ref()))
+        {
+            Some(PyValueError::new_err("ping payload already outstanding"))
+        } else {
+            None
+        };
+        if let Some(error) = invalid {
+            drop(state);
+            let _ = future.bind(py).call_method0("cancel");
+            return Err(error);
+        }
+        let transport = state
+            .transport
+            .as_ref()
+            .expect("transport checked")
+            .clone_ref(py);
         let frame = PyBytes::new_with(py, 6 + payload.len(), |out| {
             encode_control_into(&mut state, OP_PING, &payload, out);
             Ok(())
@@ -1080,8 +1114,7 @@ impl NativeClient {
                     cleanup,
                 },
             );
-        // Registration and cache invalidation precede transport.write.
-        state.buf_known_empty = false;
+        // The encoder invalidated the send cache; registration also precedes write.
         drop(state);
         if let Err(error) = transport
             .bind(py)
@@ -1254,7 +1287,7 @@ impl NativeClient {
         })?;
         drop(state);
         for ping in first_ack.into_iter().chain(extra_acks) {
-            ping.acknowledge(py)?;
+            ping.acknowledge(py);
         }
         // Answer queued pings once the State borrow is released.
         for (transport, pong_frame) in pongs {
@@ -1536,7 +1569,7 @@ impl NativeClient {
             ProtocolEvent::Pong(payload) => {
                 let ping = self.state.borrow_mut().take_ping(payload.as_ref());
                 if let Some(ping) = ping {
-                    ping.acknowledge(py)?;
+                    ping.acknowledge(py);
                 }
                 Ok(EventFlow::Continue)
             }

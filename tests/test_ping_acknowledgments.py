@@ -320,3 +320,112 @@ def test_ping_write_failure_terminates_pending_probes(loop_factory, reentrant_cl
             assert ws.closed
     with asyncio.Runner(loop_factory=loop_factory) as runner:
         runner.run(asyncio.wait_for(scenario(), 5))
+
+
+class _ProbeFuture(asyncio.Future):
+    failure = None
+    on_done = None
+
+    def remove_done_callback(self, callback):
+        if self.failure == "remove_done_callback":
+            raise RuntimeError("injected callback removal failure")
+        return super().remove_done_callback(callback)
+
+    def done(self):
+        if self.on_done is not None:
+            hook, self.on_done = self.on_done, None
+            hook()
+        if self.failure == "done":
+            raise RuntimeError("injected done failure")
+        return super().done()
+
+    def set_result(self, value):
+        if self.failure == "set_result":
+            raise RuntimeError("injected set_result failure")
+        return super().set_result(value)
+
+
+@contextlib.contextmanager
+def _probe_futures():
+    loop = asyncio.get_running_loop()
+    original = loop.create_future
+    loop.create_future = lambda: _ProbeFuture(loop=loop)
+    try:
+        yield
+    finally:
+        loop.create_future = original
+
+
+@pytest.mark.parametrize("failure", ["remove_done_callback", "done", "set_result"])
+@pytest.mark.parametrize("fragmented", [False, True])
+def test_ack_failure_does_not_interrupt_siblings_or_control_traffic(loop_factory, failure, fragmented):
+    async def scenario():
+        with _probe_futures():
+            async with peer(None) as (ws, reader, writer):
+                first = ws.ping_waiter(b"first")
+                second = ws.ping_waiter(b"second")
+                closing = ws.ping_waiter(b"closing")
+                for _ in range(3):
+                    await read_frame(reader)
+                first.failure = failure
+                data = frame(0x02, b"start") if fragmented else b""
+                data += frame(0x8A, b"first") + frame(0x8A, b"second") + frame(0x89, b"server")
+                data += frame(0x80, b"end") if fragmented else frame(0x82, b"application")
+                data += frame(0x88, b"\x03\xe8")
+                ws.data_received(data)
+                assert asyncio.Future.done(first)
+                if failure == "remove_done_callback":
+                    assert await first is None
+                else:
+                    with pytest.raises(RuntimeError, match="injected"):
+                        await first
+                assert await asyncio.wait_for(second, 1) is None
+                assert bytes(await ws.recv()) == (b"startend" if fragmented else b"application")
+                with pytest.raises(ConnectionError):
+                    await asyncio.wait_for(closing, 1)
+                assert await read_frame(reader) == (0x8A, b"server")
+                assert ws.closed
+    with asyncio.Runner(loop_factory=loop_factory) as runner:
+        runner.run(asyncio.wait_for(scenario(), 5))
+
+
+def _exercise_duplicate_reentry(mode, loop_name):
+    async def scenario():
+        with _probe_futures():
+            async with peer(None) as (ws, _reader, _writer):
+                original = ws.ping_waiter(b"same")
+                replacements = []
+                if mode == "read":
+                    original.on_done = lambda: ws.is_open
+                elif mode == "close":
+                    original.cancel()
+                    original.on_done = ws.close
+                else:
+                    original.cancel()
+                    original.on_done = lambda: replacements.append(ws.ping_waiter(b"same"))
+                with pytest.raises(ConnectionError if mode == "close" else ValueError):
+                    ws.ping_waiter(b"same")
+                if replacements:
+                    ws.data_received(frame(0x8A, b"same"))
+                    assert await asyncio.wait_for(replacements[0], 1) is None
+                original.cancel()
+    factory = asyncio.SelectorEventLoop
+    if loop_name == "uvloop":
+        import uvloop
+        factory = uvloop.new_event_loop
+    with asyncio.Runner(loop_factory=factory) as runner:
+        runner.run(asyncio.wait_for(scenario(), 5))
+
+
+@pytest.mark.parametrize("mode", ["read", "close", "replace"])
+@pytest.mark.parametrize("loop_name", ["asyncio", "uvloop"])
+def test_duplicate_check_allows_future_reentry(mode, loop_name):
+    if loop_name == "uvloop":
+        pytest.importorskip("uvloop")
+    # A RefCell reentrancy regression aborts a release extension; isolate it.
+    code = (
+        "from tests.test_ping_acknowledgments import _exercise_duplicate_reentry; "
+        f"_exercise_duplicate_reentry({mode!r}, {loop_name!r})"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
