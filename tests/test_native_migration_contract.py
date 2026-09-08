@@ -264,3 +264,52 @@ def test_rejected_upgrade_traceback_can_be_disposed_on_foreign_thread():
     thread = threading.Thread(target=lambda: (failures.clear(), gc.collect()))
     thread.start()
     thread.join()
+
+
+@pytest.mark.parametrize("terminal", [b"\x88\x02\x03\xe9", b"\x80\x03bad"])
+@pytest.mark.parametrize("path", ["bytes", "bytearray", "buffered"])
+def test_final_callback_failure_reaches_loop_after_cleanup(terminal, path):
+    async def run():
+        import websockets
+
+        async def serve(ws):
+            await ws.wait_closed()
+
+        class Callback:
+            def __call__(self, message):
+                raise ValueError("final callback failed")
+
+        loop = asyncio.get_running_loop()
+        observed = loop.create_future()
+
+        def report(loop, context):
+            if not observed.done():
+                observed.set_result(context.get("exception"))
+
+        loop.set_exception_handler(report)
+        async with websockets.serve(serve, "127.0.0.1", 0) as server:
+            callback = Callback()
+            callback_ref = weakref.ref(callback)
+            ws = await async_connect(f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}", on_message=callback)
+            del callback
+            data = b"\x81\x04last" + terminal
+            if path == "buffered":
+                buffer = ws.get_buffer(len(data))
+                buffer[: len(data)] = data
+                del buffer
+                loop.call_soon(ws.buffer_updated, len(data))
+            else:
+                loop.call_soon(ws.data_received, data if path == "bytes" else bytearray(data))
+            try:
+                error = await asyncio.wait_for(observed, 1)
+                assert isinstance(error, ValueError)
+                assert str(error) == "final callback failed"
+                assert ws.closed
+                # The reported traceback itself legitimately retains Callback.__call__.
+                error.__traceback__ = None
+                assert callback_ref() is None
+            finally:
+                ws.close()
+                loop.set_exception_handler(None)
+
+    asyncio.run(run())

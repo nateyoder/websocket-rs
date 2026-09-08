@@ -682,8 +682,8 @@ impl NativeClient {
         false
     }
 
-    fn connection_lost(&self, py: Python<'_>, _exc: Py<PyAny>) {
-        let _ = self.flush_pending_callbacks(py);
+    fn connection_lost(&self, py: Python<'_>, _exc: Py<PyAny>) -> PyResult<()> {
+        let callback_result = self.flush_pending_callbacks(py);
         let pending = {
             let mut state = self.state.borrow_mut();
             state.closed = true;
@@ -691,6 +691,7 @@ impl NativeClient {
             state.take_pending()
         };
         Self::fail_pending(py, pending, "Connection lost");
+        callback_result
     }
 
     // ---- User-facing API ----
@@ -1164,7 +1165,7 @@ impl NativeClient {
             }
             let _ = future.bind(py).call_method0("cancel");
             let _ = transport.bind(py).call_method0("close");
-            self.connection_lost(py, py.None());
+            self.connection_lost(py, py.None())?;
             return Err(PyConnectionError::new_err(format!(
                 "Ping write failed: {error}"
             )));
@@ -1330,7 +1331,7 @@ impl NativeClient {
         }
         if let ScanOutcome::Stopped { .. } = outcome {
             if let Some((pending, transport)) = close_effects {
-                self.apply_peer_close(py, pending, transport);
+                self.apply_peer_close(py, pending, transport)?;
             }
         }
         Ok(outcome)
@@ -1628,7 +1629,7 @@ impl NativeClient {
                     let mut state = self.state.borrow_mut();
                     Self::begin_peer_close(py, &mut state, code, reason)
                 };
-                self.apply_peer_close(py, pending, transport);
+                self.apply_peer_close(py, pending, transport)?;
                 Ok(EventFlow::Stop)
             }
             ProtocolEvent::ProtocolError { code, reason } => {
@@ -1636,7 +1637,7 @@ impl NativeClient {
                     let mut state = self.state.borrow_mut();
                     Self::begin_protocol_error(py, &mut state, code, reason)
                 };
-                let _ = self.flush_pending_callbacks(py);
+                let callback_result = self.flush_pending_callbacks(py);
                 self.state.borrow_mut().release_references();
                 Self::fail_pending(py, pending, reason);
                 if let Some(transport) = transport {
@@ -1651,7 +1652,7 @@ impl NativeClient {
                     }
                     let _ = transport.call_method0("close");
                 }
-                Ok(EventFlow::Stop)
+                callback_result.map(|()| EventFlow::Stop)
             }
         }
     }
@@ -1758,12 +1759,13 @@ impl NativeClient {
         py: Python<'_>,
         pending: VecDeque<Py<PyAny>>,
         transport: Option<Py<PyAny>>,
-    ) {
-        let _ = self.flush_pending_callbacks(py);
+    ) -> PyResult<()> {
+        let callback_result = self.flush_pending_callbacks(py);
         self.state.borrow_mut().release_references();
         Self::fail_pending(py, pending, "Connection closed by peer");
         if let Some(transport) = transport {
             let _ = transport.bind(py).call_method0("close");
         }
+        callback_result
     }
 }
