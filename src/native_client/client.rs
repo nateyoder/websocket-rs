@@ -1,7 +1,7 @@
 //! PyO3 bindings: NativeClient / NativeClientBuffered, the State they
 //! share, send-side control-frame encoding, and zero-copy receive helpers.
-use std::collections::VecDeque;
-use std::sync::Arc;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Weak};
 
 use bytes::{Bytes, BytesMut};
 use flate2::{Compress, Compression, FlushCompress};
@@ -17,12 +17,63 @@ use std::cell::RefCell;
 use super::codec::*;
 use super::protocol::*;
 
+pub(crate) type PingRegistry = HashMap<Arc<[u8]>, PendingPing>;
+
+pub(crate) struct PendingPing {
+    future: Py<PyAny>,
+    cleanup: Py<PingCleanup>,
+}
+
+impl PendingPing {
+    fn acknowledge(self, py: Python<'_>) -> PyResult<()> {
+        // A normal Pong needs no extra scheduled cleanup callback.
+        self.future
+            .bind(py)
+            .call_method1(pyo3::intern!(py, "remove_done_callback"), (self.cleanup,))?;
+        NativeClient::set_future_result(py, self.future.bind(py), py.None())
+    }
+}
+
+/// One weak, payload-indexed callback per pending probe. Cancellation removes
+/// only its own entry, even if the caller reuses the payload before it runs.
+#[pyclass(unsendable)]
+struct PingCleanup {
+    state: Weak<RefCell<State>>,
+    payload: Arc<[u8]>,
+}
+
+#[pymethods]
+impl PingCleanup {
+    fn __call__(&self, future: &Bound<'_, PyAny>) {
+        if let Some(state) = self.state.upgrade() {
+            let mut state = state.borrow_mut();
+            if let Some(pings) = state.pending_pings.as_mut() {
+                if pings
+                    .get(self.payload.as_ref())
+                    .is_some_and(|ping| ping.future.bind(future.py()).is(future))
+                {
+                    pings.remove(self.payload.as_ref());
+                    shrink_pings(pings);
+                }
+            }
+        }
+    }
+}
+
+fn shrink_pings(pings: &mut PingRegistry) {
+    // Amortized reclamation after bursts; retain a small heartbeat-sized table.
+    if pings.capacity() > 64 && pings.len() < pings.capacity() / 4 {
+        pings.shrink_to(pings.len().max(16));
+    }
+}
+
 pub(crate) struct State {
     pub(crate) transport: Option<Py<PyAny>>,
     pub(crate) buf: BytesMut,
     pub(crate) handshake_done: bool,
     pub(crate) handshake_fut: Option<Py<PyAny>>,
     pub(crate) expected_accept: String,
+    pub(crate) pending_pings: Option<Box<PingRegistry>>,
     pub(crate) pending_recv: VecDeque<Py<PyAny>>,
     pub(crate) backlog: VecDeque<Py<WSMessage>>,
     /// Optional synchronous callback invoked after data_received finishes
@@ -104,6 +155,23 @@ pub(crate) struct State {
 }
 
 impl State {
+    fn take_ping(&mut self, payload: &[u8]) -> Option<PendingPing> {
+        let pings = self.pending_pings.as_mut()?;
+        let ping = pings.remove(payload);
+        if ping.is_some() {
+            shrink_pings(pings);
+        }
+        ping
+    }
+
+    fn take_pending(&mut self) -> VecDeque<Py<PyAny>> {
+        let mut pending = std::mem::take(&mut self.pending_recv);
+        if let Some(mut pings) = self.pending_pings.take() {
+            pending.extend(pings.drain().map(|(_, ping)| ping.future));
+        }
+        pending
+    }
+
     /// Owned handle to `transport.write`, cloned only on the slow send paths
     /// that must call into Python after the State borrow is released.
     /// `send()` checks presence up front, so the unwrap cannot fail.
@@ -426,14 +494,19 @@ pub(crate) fn native_send(_fd: i32, _buf: &[u8]) -> isize {
 
 /// Encode a masked control frame (ping=0x9 / pong=0xA). Payload ≤125 bytes per RFC.
 pub(crate) fn encode_control_frame(state: &mut State, opcode: u8, payload: &[u8]) -> Vec<u8> {
-    let plen = payload.len().min(125);
-    let mask = next_mask_key(state);
-    let mut out = vec![0u8; 2 + 4 + plen];
-    out[0] = 0x80 | opcode;
-    out[1] = 0x80 | plen as u8;
-    out[2..6].copy_from_slice(&mask);
-    copy_masked(&mut out[6..], &payload[..plen], mask);
+    let payload = &payload[..payload.len().min(125)];
+    let mut out = vec![0u8; 6 + payload.len()];
+    encode_control_into(state, opcode, payload, &mut out);
     out
+}
+
+fn encode_control_into(state: &mut State, opcode: u8, payload: &[u8], out: &mut [u8]) {
+    state.buf_known_empty = false;
+    let mask = next_mask_key(state);
+    out[0] = 0x80 | opcode;
+    out[1] = 0x80 | payload.len() as u8;
+    out[2..6].copy_from_slice(&mask);
+    copy_masked(&mut out[6..], payload, mask);
 }
 
 /// Pull a 4-byte WebSocket mask key from the per-connection pool, refilling
@@ -588,7 +661,7 @@ impl NativeClient {
             let mut state = self.state.borrow_mut();
             state.closed = true;
             state.transport = None;
-            std::mem::take(&mut state.pending_recv)
+            state.take_pending()
         };
         Self::fail_pending(py, pending, "Connection lost");
     }
@@ -936,6 +1009,97 @@ impl NativeClient {
         Ok(())
     }
 
+    /// Send a Ping and return a Future resolved by the matching Pong.
+    /// Duplicate outstanding payloads raise ValueError. Use unique payloads
+    /// across probes: the protocol cannot distinguish replies to reused bytes.
+    #[pyo3(signature = (data=None))]
+    fn ping_waiter(
+        &self,
+        py: Python<'_>,
+        data: Option<&Bound<'_, PyBytes>>,
+    ) -> PyResult<Py<PyAny>> {
+        let payload = data.map_or(&[][..], |data| data.as_bytes());
+        if payload.len() > 125 {
+            return Err(PyValueError::new_err(
+                "ping payload exceeds 125 bytes (WS control-frame limit)",
+            ));
+        }
+        let mut state = self.state.borrow_mut();
+        if state.closed {
+            return Err(PyConnectionError::new_err("WebSocket is closed"));
+        }
+        if let Some(pings) = state.pending_pings.as_mut() {
+            if let Some(ping) = pings.get(payload) {
+                if !ping
+                    .future
+                    .bind(py)
+                    .call_method0(pyo3::intern!(py, "done"))?
+                    .extract::<bool>()?
+                {
+                    return Err(PyValueError::new_err("ping payload already outstanding"));
+                }
+                pings.remove(payload);
+            }
+        }
+        let transport = state
+            .transport
+            .as_ref()
+            .ok_or_else(|| PyConnectionError::new_err("No transport"))?
+            .clone_ref(py);
+        let create_future = state
+            .create_future
+            .as_ref()
+            .ok_or_else(|| PyConnectionError::new_err("No event loop"))?
+            .clone_ref(py);
+        drop(state);
+        let future = create_future.bind(py).call0()?.unbind();
+        let payload: Arc<[u8]> = Arc::from(payload);
+        let cleanup = Py::new(
+            py,
+            PingCleanup {
+                state: Arc::downgrade(&self.state),
+                payload: payload.clone(),
+            },
+        )?;
+        future.bind(py).call_method1(
+            pyo3::intern!(py, "add_done_callback"),
+            (cleanup.clone_ref(py),),
+        )?;
+        let mut state = self.state.borrow_mut();
+        let frame = PyBytes::new_with(py, 6 + payload.len(), |out| {
+            encode_control_into(&mut state, OP_PING, &payload, out);
+            Ok(())
+        })?;
+        state
+            .pending_pings
+            .get_or_insert_with(Default::default)
+            .insert(
+                payload.clone(),
+                PendingPing {
+                    future: future.clone_ref(py),
+                    cleanup,
+                },
+            );
+        // Registration and cache invalidation precede transport.write.
+        state.buf_known_empty = false;
+        drop(state);
+        if let Err(error) = transport
+            .bind(py)
+            .call_method1(pyo3::intern!(py, "write"), (frame,))
+        {
+            if let Some(pings) = self.state.borrow_mut().pending_pings.as_mut() {
+                pings.remove(payload.as_ref());
+            }
+            let _ = future.bind(py).call_method0("cancel");
+            let _ = transport.bind(py).call_method0("close");
+            self.connection_lost(py, py.None());
+            return Err(PyConnectionError::new_err(format!(
+                "Ping write failed: {error}"
+            )));
+        }
+        Ok(future)
+    }
+
     /// Send a pong frame proactively. Same limits as `ping`.
     #[pyo3(signature = (data=None))]
     fn pong(&self, py: Python<'_>, data: Option<Vec<u8>>) -> PyResult<()> {
@@ -979,7 +1143,7 @@ impl NativeClient {
         state.create_future = None;
         state.wait_for = None;
         let write_queue = std::mem::take(&mut state.write_queue);
-        let pending = std::mem::take(&mut state.pending_recv);
+        let pending = state.take_pending();
         drop(state);
         Self::fail_pending(py, pending, "Connection closed by client");
         // All mutex-guarded references are gone; drop pending writes and then
@@ -1039,6 +1203,8 @@ impl NativeClient {
     ) -> PyResult<ScanOutcome> {
         let mut state = self.state.borrow_mut();
         let mut close_effects = None;
+        let mut first_ack = None;
+        let mut extra_acks = Vec::new();
         let mut pongs: Vec<(Py<PyAny>, Vec<u8>)> = Vec::new();
         let outcome = walk_frames(data, |frame| -> PyResult<VisitOutcome> {
             match frame.opcode {
@@ -1068,6 +1234,15 @@ impl NativeClient {
                         pongs.push((transport, pong_frame));
                     }
                 }
+                OP_PONG => {
+                    if let Some(ping) = state.take_ping(frame.payload) {
+                        if first_ack.is_none() {
+                            first_ack = Some(ping);
+                        } else {
+                            extra_acks.push(ping);
+                        }
+                    }
+                }
                 OP_CLOSE => {
                     let (code, reason) = parse_close_payload(frame.payload);
                     close_effects = Some(Self::begin_peer_close(py, &mut state, code, reason));
@@ -1078,6 +1253,9 @@ impl NativeClient {
             Ok(VisitOutcome::Continue)
         })?;
         drop(state);
+        for ping in first_ack.into_iter().chain(extra_acks) {
+            ping.acknowledge(py)?;
+        }
         // Answer queued pings once the State borrow is released.
         for (transport, pong_frame) in pongs {
             let _ = transport
@@ -1355,6 +1533,13 @@ impl NativeClient {
                 }
                 Ok(EventFlow::Continue)
             }
+            ProtocolEvent::Pong(payload) => {
+                let ping = self.state.borrow_mut().take_ping(payload.as_ref());
+                if let Some(ping) = ping {
+                    ping.acknowledge(py)?;
+                }
+                Ok(EventFlow::Continue)
+            }
             ProtocolEvent::SendPong(payload) => {
                 let write = {
                     let mut state = self.state.borrow_mut();
@@ -1465,7 +1650,7 @@ impl NativeClient {
         state.close_code = Some(code);
         state.close_reason = Some(reason.to_string());
         state.closed = true;
-        let pending = std::mem::take(&mut state.pending_recv);
+        let pending = state.take_pending();
         let transport = state.transport.as_ref().map(|t| t.clone_ref(py));
         let frame = encode_control_frame(state, OP_CLOSE, &code.to_be_bytes());
         (pending, transport, frame)
@@ -1485,7 +1670,7 @@ impl NativeClient {
             state.close_reason = reason;
         }
         state.closed = true;
-        let pending = std::mem::take(&mut state.pending_recv);
+        let pending = state.take_pending();
         let transport = state.transport.as_ref().map(|t| t.clone_ref(py));
         (pending, transport)
     }

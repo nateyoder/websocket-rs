@@ -10,6 +10,7 @@ legacy module is deprecated and will be removed in 2.0.
 
 from __future__ import annotations
 
+import asyncio
 import ssl as _ssl
 from collections.abc import AsyncIterator, Callable
 from types import TracebackType
@@ -50,6 +51,15 @@ class NativeClient:
 
     def ping(self, data: bytes | None = None) -> None:
         """Send a ping (opcode 0x9) control frame. Payload must be ≤125 bytes."""
+        ...
+
+    def ping_waiter(self, data: bytes | None = None) -> asyncio.Future[None]:
+        """Send a Ping immediately; resolve on its matching Pong.
+
+        Payloads are at most 125 bytes. Duplicate outstanding payloads raise
+        ValueError; use fresh bytes per probe to distinguish delayed replies.
+        Cancellation affects only this probe. Closure raises ConnectionError.
+        """
         ...
 
     def close(self) -> None:

@@ -343,3 +343,32 @@ MIT License - See [LICENSE](LICENSE)
 - [Why Rust async is fast](https://tokio.rs/tokio/tutorial)
 - [PyO3 performance guide](https://pyo3.rs/main/doc/pyo3/performance)
 - [WebSocket protocol RFC 6455](https://datatracker.ietf.org/doc/html/rfc6455)
+
+### Awaiting protocol Ping acknowledgments
+
+The native async client exposes `ws.ping_waiter(data=None)`. It sends a Ping
+immediately and returns an asyncio Future that resolves to `None` when a Pong
+with exactly the same payload arrives. No `recv()` call or application message
+is needed to process acknowledgments.
+
+```python
+import asyncio
+import secrets
+
+ack = ws.ping_waiter(secrets.token_bytes(16))
+await asyncio.wait_for(ack, timeout=5.0)
+```
+
+The caller owns scheduling, acknowledgment deadlines, and reconnect decisions.
+Ordinary application traffic and unrelated Pongs do not extend the deadline.
+Concurrent probes with distinct payloads can complete in any order. A duplicate
+outstanding payload raises `ValueError`; payloads must be at most 125 bytes
+(the default is empty bytes). Use a fresh payload for each probe, including
+fire-and-forget Pings: the wire protocol cannot distinguish a delayed reply
+from an acknowledgment of a later Ping that reused the same payload.
+
+Canceling the Future, including through `asyncio.wait_for`, leaves application
+receiving and other probes running. Closed connections and transport failures
+fail pending acknowledgment Futures with `ConnectionError`. `ws.ping(data)`
+continues to send a Ping and return `None` without waiting for acknowledgment;
+automatic replies to server Pings are unchanged.
