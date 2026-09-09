@@ -120,6 +120,8 @@ async def connect(
     proxy: str | None = None,
     compression: bool = False,
     on_message: Callable[[WSMessage], None] | None = None,
+    tls_backend: str = "auto",
+    rustls_ca_file: str | None = None,
 ) -> NativeClient:
     """Connect to ``uri`` (``ws://`` or ``wss://``) and complete the handshake.
 
@@ -128,8 +130,8 @@ async def connect(
     - ``subprotocols`` sets ``Sec-WebSocket-Protocol``; the negotiated value
       is then on :attr:`NativeClient.subprotocol`.
     - ``ssl_context`` overrides the default ``ssl.create_default_context()``
-      used for ``wss://``. TLS is driven by asyncio so the protocol sees
-      decrypted bytes.
+      used for ``wss://``. TLS is driven by the transport so the protocol
+      sees decrypted bytes. Not accepted by ``tls_backend="rustls"``.
     - ``connect_timeout`` defaults to 10 seconds when omitted or ``None`` and
       wraps the full TCP+TLS+handshake sequence in ``asyncio.wait_for``;
       raises ``TimeoutError`` on expiry.
@@ -147,6 +149,25 @@ async def connect(
       server doesn't echo the extension header the client silently falls
       back to sending uncompressed frames. ``picows`` exposes the RSV1 bit
       but does not compress or decompress for you.
+    - ``tls_backend`` picks the transport that carries ``wss://`` traffic;
+      it is ignored for ``ws://``.
+
+      * ``"auto"`` (default) uses ``aiofastnet`` when it is importable and
+        falls back to ``loop.create_connection`` otherwise. aiofastnet's
+        OpenSSL transport measured ~+10% request throughput at both 256 B and
+        8 KiB versus asyncio's SSLProtocol; install it with the ``fast-tls``
+        extra.
+      * ``"asyncio"`` pins the stdlib path.
+      * ``"aiofastnet"`` requires aiofastnet and raises ``RuntimeError`` if it
+        is not installed, for callers who would rather fail than silently run
+        slower.
+      * ``"rustls"`` is experimental and only present in builds made with the
+        ``rustls-transport`` cargo feature; it terminates TLS in Rust on the
+        event-loop thread. It takes ``rustls_ca_file`` instead of
+        ``ssl_context`` and does not implement client-certificate auth.
+    - ``rustls_ca_file`` is a PEM trust store for ``tls_backend="rustls"``.
+      Omit it to use the platform's native root certificates. Passing it with
+      any other backend raises ``ValueError``.
     - ``on_message`` switches delivery to a synchronous callback invoked
       from the asyncio Protocol ``data_received`` path. When set, messages
       are NOT queued for :meth:`NativeClient.recv` — the callback receives

@@ -1400,7 +1400,7 @@ impl NativeClient {
         self.park_tail_and_drain(py, outcome, data)
     }
 
-    fn data_received_inner(&self, py: Python<'_>, data: &[u8]) -> PyResult<()> {
+    pub(super) fn data_received_inner(&self, py: Python<'_>, data: &[u8]) -> PyResult<()> {
         if self.fast_path_eligible() {
             let outcome = self.scan_frame_aligned(py, data, PayloadMode::Copy)?;
             return self.park_tail_and_drain(py, outcome, data);
@@ -1414,7 +1414,7 @@ impl NativeClient {
 
     /// Drain pending_callback_msgs and invoke the user callback for each.
     /// Must be called with no outstanding borrow on State.
-    fn flush_pending_callbacks(&self, py: Python<'_>) -> PyResult<()> {
+    pub(super) fn flush_pending_callbacks(&self, py: Python<'_>) -> PyResult<()> {
         // `on_message` is fixed for the life of the connection (set in
         // connect(), cleared only by close()), so one clone covers the loop.
         let cb = {
