@@ -32,6 +32,10 @@ default = ["extension-module"]
 # pyo3 skips while building an extension module. maturin builds keep the default.
 extension-module = ["pyo3/extension-module"]
 echo-server-bin = ["dep:fastwebsockets", "dep:hyper", "dep:hyper-util", "dep:http-body-util"]
+# Experimental same-thread rustls TLS transport for the native client
+# (tls_backend="rustls"). Off by default: it is measurably slower than the
+# aiofastnet path at 8 KiB payloads. See docs/performance-audit/RUSTLS-PROTOTYPE.md.
+rustls-transport = []
 
 [dependencies.fastwebsockets]
 version = "0.10"
