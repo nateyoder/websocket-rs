@@ -1,0 +1,46 @@
+........................................................................ [ 38%]
+........................................................................ [ 77%]
+.........................................                                [100%]
+=============================== warnings summary ===============================
+tests/test_compatibility.py::test_rust_async_api
+  /Users/nyoder/.codex/worktrees/2a57/websocket-rs/tests/test_compatibility.py:253: DeprecationWarning: websocket_rs.async_client.connect is deprecated: use websocket_rs.connect (or websocket_rs.native_client.connect) for the asyncio.Protocol-native implementation. async_client will be removed in 2.0.
+    async with await async_connect("ws://localhost:8765") as ws:
+
+tests/test_compatibility.py::test_rust_async_api
+  /Users/nyoder/.codex/worktrees/2a57/websocket-rs/tests/test_compatibility.py:260: DeprecationWarning: websocket_rs.async_client.connect is deprecated: use websocket_rs.connect (or websocket_rs.native_client.connect) for the asyncio.Protocol-native implementation. async_client will be removed in 2.0.
+    ws = await async_connect("ws://localhost:8765")
+
+tests/test_compatibility.py::test_rust_async_api
+  /Users/nyoder/.codex/worktrees/2a57/websocket-rs/tests/test_compatibility.py:268: DeprecationWarning: websocket_rs.async_client.connect is deprecated: use websocket_rs.connect (or websocket_rs.native_client.connect) for the asyncio.Protocol-native implementation. async_client will be removed in 2.0.
+    async with await async_connect("ws://localhost:8765") as ws:
+
+tests/test_compatibility.py::test_rust_async_api
+  /Users/nyoder/.codex/worktrees/2a57/websocket-rs/tests/test_compatibility.py:277: DeprecationWarning: websocket_rs.async_client.connect is deprecated: use websocket_rs.connect (or websocket_rs.native_client.connect) for the asyncio.Protocol-native implementation. async_client will be removed in 2.0.
+    async with await async_connect("ws://localhost:8765") as ws:
+
+tests/test_compatibility.py::test_rust_async_api
+  /Users/nyoder/.codex/worktrees/2a57/websocket-rs/tests/test_compatibility.py:291: DeprecationWarning: websocket_rs.async_client.connect is deprecated: use websocket_rs.connect (or websocket_rs.native_client.connect) for the asyncio.Protocol-native implementation. async_client will be removed in 2.0.
+    async with await async_connect("ws://localhost:8765") as ws:
+
+tests/test_compatibility.py::test_performance_comparison
+  /Users/nyoder/.codex/worktrees/2a57/websocket-rs/tests/test_compatibility.py:307: DeprecationWarning: websocket_rs.async_client.connect is deprecated: use websocket_rs.connect (or websocket_rs.native_client.connect) for the asyncio.Protocol-native implementation. async_client will be removed in 2.0.
+    ws = await async_connect("ws://localhost:8765")
+
+tests/test_native_features.py::test_async_connect_reserved_headers_preserve_generated_handshake_values
+  /Users/nyoder/.codex/worktrees/2a57/websocket-rs/tests/test_native_features.py:260: DeprecationWarning: websocket_rs.async_client.connect is deprecated: use websocket_rs.connect (or websocket_rs.native_client.connect) for the asyncio.Protocol-native implementation. async_client will be removed in 2.0.
+    ws = await websocket_rs.async_client.connect(
+
+tests/test_timeout_and_errors.py::test_async_send_after_close
+  /Users/nyoder/.codex/worktrees/2a57/websocket-rs/tests/test_timeout_and_errors.py:313: DeprecationWarning: websocket_rs.async_client.connect is deprecated: use websocket_rs.connect (or websocket_rs.native_client.connect) for the asyncio.Protocol-native implementation. async_client will be removed in 2.0.
+    ws = await websocket_rs.async_client.connect("ws://localhost:8766")
+
+tests/test_timeout_and_errors.py::test_async_connect_function_connect_timeout_kwarg_expires_promptly
+  /Users/nyoder/.codex/worktrees/2a57/websocket-rs/tests/test_timeout_and_errors.py:358: DeprecationWarning: websocket_rs.async_client.connect is deprecated: use websocket_rs.connect (or websocket_rs.native_client.connect) for the asyncio.Protocol-native implementation. async_client will be removed in 2.0.
+    websocket_rs.async_client.connect(
+
+tests/test_timeout_and_errors.py::test_async_connect_function_receive_timeout_kwarg_expires_promptly
+  /Users/nyoder/.codex/worktrees/2a57/websocket-rs/tests/test_timeout_and_errors.py:370: DeprecationWarning: websocket_rs.async_client.connect is deprecated: use websocket_rs.connect (or websocket_rs.native_client.connect) for the asyncio.Protocol-native implementation. async_client will be removed in 2.0.
+    ws = await websocket_rs.async_client.connect(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+185 passed, 10 warnings in 36.38s

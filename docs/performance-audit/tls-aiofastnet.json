@@ -1,0 +1,410 @@
+{
+  "environment": {
+    "python": "3.13.14 (main, Jun 10 2026, 12:24:04) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "native_commit": "a006d393bcf0601b553459dcd97e6592fb674187",
+    "duration": 2,
+    "warmup": 0.5,
+    "loop": "uvloop",
+    "compression": false,
+    "candidate": "/tmp/ws-audit/tls_aiofastnet.so"
+  },
+  "raw": {
+    "tls/256": {
+      "native": [
+        {
+          "count": 73473,
+          "elapsed": 2.0000069169909693,
+          "rps": 36736.37294742004,
+          "client_cpu_us_per_message": 13.648483116246783,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 76770,
+          "elapsed": 2.0000024999899324,
+          "rps": 38384.9520190032,
+          "client_cpu_us_per_message": 13.601953888237594,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 85074,
+          "elapsed": 2.0000032499956433,
+          "rps": 42536.93087757999,
+          "client_cpu_us_per_message": 12.654265698098126,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 51416,
+          "elapsed": 2.000193207990378,
+          "rps": 25705.516744384095,
+          "client_cpu_us_per_message": 15.479344950988017,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 89636,
+          "elapsed": 2.0000157920003403,
+          "rps": 44817.64611985861,
+          "client_cpu_us_per_message": 12.209871033959569,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 86551,
+          "elapsed": 2.0000095829891507,
+          "rps": 43275.29264667004,
+          "client_cpu_us_per_message": 12.452819724786542,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 80718,
+          "elapsed": 2.000013958022464,
+          "rps": 40358.718336051425,
+          "client_cpu_us_per_message": 13.056703585321737,
+          "picows_version": "2.1.1"
+        }
+      ],
+      "native_candidate": [
+        {
+          "count": 81672,
+          "elapsed": 2.000010249990737,
+          "rps": 40835.79071676171,
+          "client_cpu_us_per_message": 11.828154079733569,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 92520,
+          "elapsed": 2.0000023329921532,
+          "rps": 46259.94603795444,
+          "client_cpu_us_per_message": 10.774373108517077,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 94094,
+          "elapsed": 2.0000214999890886,
+          "rps": 47046.49425044348,
+          "client_cpu_us_per_message": 10.624418135056432,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 94674,
+          "elapsed": 2.0000091249821708,
+          "rps": 47336.78402634487,
+          "client_cpu_us_per_message": 10.65791030272303,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 25256,
+          "elapsed": 2.0000140409974847,
+          "rps": 12627.911345764278,
+          "client_cpu_us_per_message": 19.582554640481472,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 95454,
+          "elapsed": 2.000005208014045,
+          "rps": 47726.87571888047,
+          "client_cpu_us_per_message": 10.497695224925096,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 88657,
+          "elapsed": 2.000019583996618,
+          "rps": 44328.06593965327,
+          "client_cpu_us_per_message": 11.199510472946299,
+          "picows_version": "2.1.1"
+        }
+      ],
+      "picows_compat": [
+        {
+          "count": 79066,
+          "elapsed": 2.0000042500032578,
+          "rps": 39532.91599248912,
+          "client_cpu_us_per_message": 12.517251410214248,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 97031,
+          "elapsed": 2.0000042500032578,
+          "rps": 48515.39690470255,
+          "client_cpu_us_per_message": 10.645566880687616,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 93423,
+          "elapsed": 2.0000103329948615,
+          "rps": 46711.258666402115,
+          "client_cpu_us_per_message": 10.988771501664472,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 93760,
+          "elapsed": 2.0000044589978643,
+          "rps": 46879.89548132309,
+          "client_cpu_us_per_message": 10.906623293515358,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 62970,
+          "elapsed": 2.0000098339805845,
+          "rps": 31484.84518932185,
+          "client_cpu_us_per_message": 13.61594410036525,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 97003,
+          "elapsed": 2.0000082920014393,
+          "rps": 48501.2989135798,
+          "client_cpu_us_per_message": 10.629877426471348,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 91456,
+          "elapsed": 2.0000109170214273,
+          "rps": 45727.75039458456,
+          "client_cpu_us_per_message": 11.167217022393283,
+          "picows_version": "2.1.1"
+        }
+      ]
+    },
+    "tls/8192": {
+      "native": [
+        {
+          "count": 54827,
+          "elapsed": 2.000026041001547,
+          "rps": 27413.14306714949,
+          "client_cpu_us_per_message": 18.714702610027906,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 58400,
+          "elapsed": 2.000037499994505,
+          "rps": 29199.452510345654,
+          "client_cpu_us_per_message": 17.69900684931507,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 61108,
+          "elapsed": 2.0000286249851342,
+          "rps": 30553.562702360923,
+          "client_cpu_us_per_message": 16.889785298160632,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 18167,
+          "elapsed": 2.000066709006205,
+          "rps": 9083.197034476332,
+          "client_cpu_us_per_message": 26.929597622061976,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 60460,
+          "elapsed": 2.0000294579949696,
+          "rps": 30229.554748964136,
+          "client_cpu_us_per_message": 16.980482963943103,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 60955,
+          "elapsed": 2.0000298749946523,
+          "rps": 30477.044749225548,
+          "client_cpu_us_per_message": 16.788270035271925,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 59397,
+          "elapsed": 2.0000236670020968,
+          "rps": 29698.148566927797,
+          "client_cpu_us_per_message": 17.275805175345553,
+          "picows_version": "2.1.1"
+        }
+      ],
+      "native_candidate": [
+        {
+          "count": 61648,
+          "elapsed": 2.000034875003621,
+          "rps": 30823.462515816576,
+          "client_cpu_us_per_message": 16.00311445626784,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 64180,
+          "elapsed": 2.0000335839868058,
+          "rps": 32089.46115398,
+          "client_cpu_us_per_message": 15.13521346213774,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 66735,
+          "elapsed": 2.0000152089924086,
+          "rps": 33367.24625890248,
+          "client_cpu_us_per_message": 14.701910541694762,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 9760,
+          "elapsed": 2.000084166007582,
+          "rps": 4879.794643583515,
+          "client_cpu_us_per_message": 35.86577868852459,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 62661,
+          "elapsed": 2.0000182499934454,
+          "rps": 31330.21411189891,
+          "client_cpu_us_per_message": 14.43049105504221,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 67220,
+          "elapsed": 2.0000082920014393,
+          "rps": 33609.860653493546,
+          "client_cpu_us_per_message": 14.735911930972925,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 64932,
+          "elapsed": 2.0000221249938477,
+          "rps": 32465.640848947976,
+          "client_cpu_us_per_message": 15.154068872050761,
+          "picows_version": "2.1.1"
+        }
+      ],
+      "picows_compat": [
+        {
+          "count": 63426,
+          "elapsed": 2.0000070829992183,
+          "rps": 31712.887688820647,
+          "client_cpu_us_per_message": 15.66160565067953,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 65039,
+          "elapsed": 2.0000334169890266,
+          "rps": 32518.956657191116,
+          "client_cpu_us_per_message": 15.370762158089759,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 67668,
+          "elapsed": 2.000009332987247,
+          "rps": 33833.84211459151,
+          "client_cpu_us_per_message": 14.79606313176095,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 11247,
+          "elapsed": 2.0010112089803442,
+          "rps": 5620.65816999153,
+          "client_cpu_us_per_message": 34.23855250288966,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 68005,
+          "elapsed": 2.000007959024515,
+          "rps": 34002.36468717294,
+          "client_cpu_us_per_message": 14.68292037350195,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 68460,
+          "elapsed": 2.000019541999791,
+          "rps": 34229.66554194157,
+          "client_cpu_us_per_message": 14.558793456032719,
+          "picows_version": "2.1.1"
+        },
+        {
+          "count": 65151,
+          "elapsed": 2.0000195000029635,
+          "rps": 32575.182391923412,
+          "client_cpu_us_per_message": 15.323387208177923,
+          "picows_version": "2.1.1"
+        }
+      ]
+    }
+  },
+  "summary": {
+    "tls/256": {
+      "median_rps": {
+        "native": 40358.718336051425,
+        "native_candidate": 46259.94603795444,
+        "picows_compat": 46711.258666402115
+      },
+      "median_cpu_us": {
+        "native": 13.056703585321737,
+        "native_candidate": 10.774373108517077,
+        "picows_compat": 10.988771501664472
+      },
+      "compat_vs_native": {
+        "rounds": 7,
+        "baseline_median_rps": 40358.718336051425,
+        "candidate_median_rps": 46711.258666402115,
+        "paired_median_pct": 12.076189315641495,
+        "ci_low_pct": 7.6124636720988015,
+        "ci_high_pct": 26.391709127795938,
+        "wins": 6,
+        "meets_gate": true
+      },
+      "compat_vs_candidate": {
+        "rounds": 7,
+        "baseline_median_rps": 46259.94603795444,
+        "candidate_median_rps": 46711.258666402115,
+        "paired_median_pct": 1.6226144767170991,
+        "ci_low_pct": -0.9651871254445665,
+        "ci_high_pct": 4.875602027070247,
+        "wins": 4,
+        "meets_gate": false
+      },
+      "candidate_vs_native": {
+        "rounds": 7,
+        "baseline_median_rps": 40358.718336051425,
+        "candidate_median_rps": 46259.94603795444,
+        "paired_median_pct": 10.60152502737417,
+        "ci_low_pct": 9.83516763478618,
+        "ci_high_pct": 20.51583655765046,
+        "wins": 6,
+        "meets_gate": true
+      }
+    },
+    "tls/8192": {
+      "median_rps": {
+        "native": 29698.148566927797,
+        "native_candidate": 32089.46115398,
+        "picows_compat": 32575.182391923412
+      },
+      "median_cpu_us": {
+        "native": 17.275805175345553,
+        "native_candidate": 15.13521346213774,
+        "picows_compat": 15.323387208177923
+      },
+      "compat_vs_native": {
+        "rounds": 7,
+        "baseline_median_rps": 29698.148566927797,
+        "candidate_median_rps": 32575.182391923412,
+        "paired_median_pct": 11.368378039517445,
+        "ci_low_pct": 9.687586478705645,
+        "ci_high_pct": 12.480534263701282,
+        "wins": 6,
+        "meets_gate": true
+      },
+      "compat_vs_candidate": {
+        "rounds": 7,
+        "baseline_median_rps": 32089.46115398,
+        "candidate_median_rps": 32575.182391923412,
+        "paired_median_pct": 1.844116209936142,
+        "ci_low_pct": 1.3384316462972112,
+        "ci_high_pct": 8.528989191488412,
+        "wins": 7,
+        "meets_gate": false
+      },
+      "candidate_vs_native": {
+        "rounds": 7,
+        "baseline_median_rps": 29698.148566927797,
+        "candidate_median_rps": 32089.46115398,
+        "paired_median_pct": 9.31873674139434,
+        "ci_low_pct": 3.6410042161553413,
+        "ci_high_pct": 10.279264049535541,
+        "wins": 6,
+        "meets_gate": true
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+diff --git a/src/native_client/client.rs b/src/native_client/client.rs
+index 08cd5df..3d67897 100644
+--- a/src/native_client/client.rs
++++ b/src/native_client/client.rs
+@@ -1441,6 +1441,9 @@ impl NativeClient {
+     ) -> PyResult<Bound<'py, PyAny>> {
+         let mut st = self.state.borrow_mut();
+         const HEADROOM: usize = 65536;
++        if st.recv_pos == 0 && st.recv_buf.capacity() > 262144 {
++            st.recv_buf = Vec::with_capacity(HEADROOM);
++        }
+         let need = st.recv_pos + HEADROOM;
+         if st.recv_buf.capacity() < need {
+             let extra = need - st.recv_buf.capacity();

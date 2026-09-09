@@ -1,0 +1,22 @@
+{
+  "256": {
+    "rounds": 15,
+    "baseline_median_rps": 42652.17397072117,
+    "candidate_median_rps": 45510.32723554049,
+    "paired_median_pct": 5.804189185832054,
+    "ci_low_pct": 5.472734586867256,
+    "ci_high_pct": 7.612517556694254,
+    "wins": 14,
+    "meets_gate": true
+  },
+  "8192": {
+    "rounds": 15,
+    "baseline_median_rps": 32808.96332479025,
+    "candidate_median_rps": 31792.597782797144,
+    "paired_median_pct": -3.301401087442646,
+    "ci_low_pct": -3.98675260489173,
+    "ci_high_pct": -2.8953357026344717,
+    "wins": 1,
+    "meets_gate": false
+  }
+}

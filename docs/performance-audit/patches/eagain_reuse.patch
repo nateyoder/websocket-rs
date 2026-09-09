@@ -1,0 +1,18 @@
+diff --git a/src/native_client/client.rs b/src/native_client/client.rs
+index 08cd5df..8b9a9ec 100644
+--- a/src/native_client/client.rs
++++ b/src/native_client/client.rs
+@@ -831,6 +831,13 @@ impl NativeClient {
+                     write.bind(py).call1((tail,))?;
+                     return Ok(());
+                 }
++                // The scratch frame is already masked. Reuse it after EAGAIN.
++                let out = PyBytes::new(py, &st.send_buf[..total]);
++                st.buf_known_empty = false;
++                let write = st.transport_write(py);
++                drop(st);
++                write.bind(py).call1((out,))?;
++                return Ok(());
+             }
+         }
+         let out = self.build_merged_frame(py, header, payload, mask_key)?;

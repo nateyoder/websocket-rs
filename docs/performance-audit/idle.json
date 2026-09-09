@@ -1,0 +1,29 @@
+[
+  {
+    "connections": 1000,
+    "rss_before": 34127872,
+    "rss_after": 53493760,
+    "rss_bytes_per_connection": 19365.888,
+    "peak_rss_delta_platform_units": 19365888,
+    "page_size": 16384,
+    "receive_capacity_first_connection": 65536
+  },
+  {
+    "connections": 1000,
+    "rss_before": 34144256,
+    "rss_after": 53460992,
+    "rss_bytes_per_connection": 19316.736,
+    "peak_rss_delta_platform_units": 19316736,
+    "page_size": 16384,
+    "receive_capacity_first_connection": 65536
+  },
+  {
+    "connections": 1000,
+    "rss_before": 34078720,
+    "rss_after": 53379072,
+    "rss_bytes_per_connection": 19300.352,
+    "peak_rss_delta_platform_units": 19300352,
+    "page_size": 16384,
+    "receive_capacity_first_connection": 65536
+  }
+]

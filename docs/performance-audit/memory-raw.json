@@ -1,0 +1,437 @@
+{
+  "retention": {
+    "main": [
+      [
+        {
+          "label": "128_small_messages_retained",
+          "rss_delta": 36339712,
+          "python_bytes_delta": 33573466,
+          "useful_payload_bytes": 2048
+        },
+        {
+          "label": "released",
+          "rss_delta": 36356096,
+          "python_bytes_delta": 4218
+        }
+      ],
+      [
+        {
+          "label": "128_small_messages_retained",
+          "rss_delta": 36470784,
+          "python_bytes_delta": 33573466,
+          "useful_payload_bytes": 2048
+        },
+        {
+          "label": "released",
+          "rss_delta": 36470784,
+          "python_bytes_delta": 4218
+        }
+      ],
+      [
+        {
+          "label": "128_small_messages_retained",
+          "rss_delta": 36126720,
+          "python_bytes_delta": 33573466,
+          "useful_payload_bytes": 2048
+        },
+        {
+          "label": "released",
+          "rss_delta": 36126720,
+          "python_bytes_delta": 4218
+        }
+      ]
+    ],
+    "small_copy": [
+      [
+        {
+          "label": "128_small_messages_retained",
+          "rss_delta": 1097728,
+          "python_bytes_delta": 11226,
+          "useful_payload_bytes": 2048
+        },
+        {
+          "label": "released",
+          "rss_delta": 1097728,
+          "python_bytes_delta": 4218
+        }
+      ],
+      [
+        {
+          "label": "128_small_messages_retained",
+          "rss_delta": 638976,
+          "python_bytes_delta": 11226,
+          "useful_payload_bytes": 2048
+        },
+        {
+          "label": "released",
+          "rss_delta": 655360,
+          "python_bytes_delta": 4218
+        }
+      ],
+      [
+        {
+          "label": "128_small_messages_retained",
+          "rss_delta": 393216,
+          "python_bytes_delta": 11226,
+          "useful_payload_bytes": 2048
+        },
+        {
+          "label": "released",
+          "rss_delta": 393216,
+          "python_bytes_delta": 4218
+        }
+      ]
+    ]
+  },
+  "backlog": {
+    "main": [
+      [
+        {
+          "label": "queued",
+          "rss_delta": 8601600,
+          "python_bytes_delta": 7051,
+          "messages": 128,
+          "payload_bytes": 8388608
+        },
+        {
+          "label": "queued",
+          "rss_delta": 33882112,
+          "python_bytes_delta": 25827,
+          "messages": 512,
+          "payload_bytes": 33554432
+        },
+        {
+          "label": "queued",
+          "rss_delta": 67534848,
+          "python_bytes_delta": 50683,
+          "messages": 1024,
+          "payload_bytes": 67108864
+        },
+        {
+          "label": "drained",
+          "rss_delta": 67584000,
+          "python_bytes_delta": 4786
+        }
+      ],
+      [
+        {
+          "label": "queued",
+          "rss_delta": 8503296,
+          "python_bytes_delta": 7051,
+          "messages": 128,
+          "payload_bytes": 8388608
+        },
+        {
+          "label": "queued",
+          "rss_delta": 33734656,
+          "python_bytes_delta": 25827,
+          "messages": 512,
+          "payload_bytes": 33554432
+        },
+        {
+          "label": "queued",
+          "rss_delta": 67485696,
+          "python_bytes_delta": 50683,
+          "messages": 1024,
+          "payload_bytes": 67108864
+        },
+        {
+          "label": "drained",
+          "rss_delta": 67534848,
+          "python_bytes_delta": 4786
+        }
+      ],
+      [
+        {
+          "label": "queued",
+          "rss_delta": 8454144,
+          "python_bytes_delta": 7051,
+          "messages": 128,
+          "payload_bytes": 8388608
+        },
+        {
+          "label": "queued",
+          "rss_delta": 33701888,
+          "python_bytes_delta": 25827,
+          "messages": 512,
+          "payload_bytes": 33554432
+        },
+        {
+          "label": "queued",
+          "rss_delta": 67485696,
+          "python_bytes_delta": 50683,
+          "messages": 1024,
+          "payload_bytes": 67108864
+        },
+        {
+          "label": "drained",
+          "rss_delta": 67534848,
+          "python_bytes_delta": 4786
+        }
+      ]
+    ]
+  },
+  "writes": {
+    "main": [
+      [
+        {
+          "label": "queued",
+          "rss_delta": 10387456,
+          "python_bytes_delta": 8460809,
+          "messages": 128,
+          "payload_bytes": 8388608
+        },
+        {
+          "label": "queued",
+          "rss_delta": 42008576,
+          "python_bytes_delta": 33645025,
+          "messages": 512,
+          "payload_bytes": 33554432
+        },
+        {
+          "label": "queued",
+          "rss_delta": 84017152,
+          "python_bytes_delta": 67223801,
+          "messages": 1024,
+          "payload_bytes": 67108864
+        },
+        {
+          "label": "resume_with_immediate_repause",
+          "rss_delta": 84049920,
+          "python_bytes_delta": 134092,
+          "writes": 1024,
+          "stall_ms": 1.7275
+        }
+      ],
+      [
+        {
+          "label": "queued",
+          "rss_delta": 10403840,
+          "python_bytes_delta": 8460809,
+          "messages": 128,
+          "payload_bytes": 8388608
+        },
+        {
+          "label": "queued",
+          "rss_delta": 42024960,
+          "python_bytes_delta": 33645025,
+          "messages": 512,
+          "payload_bytes": 33554432
+        },
+        {
+          "label": "queued",
+          "rss_delta": 84017152,
+          "python_bytes_delta": 67223801,
+          "messages": 1024,
+          "payload_bytes": 67108864
+        },
+        {
+          "label": "resume_with_immediate_repause",
+          "rss_delta": 84066304,
+          "python_bytes_delta": 136622,
+          "writes": 1024,
+          "stall_ms": 1.6265
+        }
+      ],
+      [
+        {
+          "label": "queued",
+          "rss_delta": 10321920,
+          "python_bytes_delta": 8460809,
+          "messages": 128,
+          "payload_bytes": 8388608
+        },
+        {
+          "label": "queued",
+          "rss_delta": 41926656,
+          "python_bytes_delta": 33645025,
+          "messages": 512,
+          "payload_bytes": 33554432
+        },
+        {
+          "label": "queued",
+          "rss_delta": 84049920,
+          "python_bytes_delta": 67223801,
+          "messages": 1024,
+          "payload_bytes": 67108864
+        },
+        {
+          "label": "resume_with_immediate_repause",
+          "rss_delta": 84082688,
+          "python_bytes_delta": 136530,
+          "writes": 1024,
+          "stall_ms": 1.637625
+        }
+      ]
+    ]
+  },
+  "buffers": {
+    "main": [
+      [
+        {
+          "label": "after_8MiB_receive",
+          "rss_delta": 38830080,
+          "python_bytes_delta": 4030,
+          "next_buffer_bytes": 16777216
+        },
+        {
+          "label": "after_1000_small_messages",
+          "rss_delta": 38862848,
+          "python_bytes_delta": 4370,
+          "next_buffer_bytes": 16777216
+        },
+        {
+          "label": "closed_client_still_referenced",
+          "rss_delta": 38895616,
+          "python_bytes_delta": 4777,
+          "next_buffer_bytes": 16777216
+        }
+      ],
+      [
+        {
+          "label": "after_8MiB_receive",
+          "rss_delta": 38912000,
+          "python_bytes_delta": 4030,
+          "next_buffer_bytes": 16777216
+        },
+        {
+          "label": "after_1000_small_messages",
+          "rss_delta": 38928384,
+          "python_bytes_delta": 4370,
+          "next_buffer_bytes": 16777216
+        },
+        {
+          "label": "closed_client_still_referenced",
+          "rss_delta": 38961152,
+          "python_bytes_delta": 4777,
+          "next_buffer_bytes": 16777216
+        }
+      ],
+      [
+        {
+          "label": "after_8MiB_receive",
+          "rss_delta": 39010304,
+          "python_bytes_delta": 4030,
+          "next_buffer_bytes": 16777216
+        },
+        {
+          "label": "after_1000_small_messages",
+          "rss_delta": 39026688,
+          "python_bytes_delta": 4370,
+          "next_buffer_bytes": 16777216
+        },
+        {
+          "label": "closed_client_still_referenced",
+          "rss_delta": 39059456,
+          "python_bytes_delta": 4777,
+          "next_buffer_bytes": 16777216
+        }
+      ]
+    ],
+    "recv_reclaim": [
+      [
+        {
+          "label": "after_8MiB_receive",
+          "rss_delta": 38912000,
+          "python_bytes_delta": 4030,
+          "next_buffer_bytes": 65536
+        },
+        {
+          "label": "after_1000_small_messages",
+          "rss_delta": 38928384,
+          "python_bytes_delta": 4370,
+          "next_buffer_bytes": 65536
+        },
+        {
+          "label": "closed_client_still_referenced",
+          "rss_delta": 38961152,
+          "python_bytes_delta": 4777,
+          "next_buffer_bytes": 65536
+        }
+      ],
+      [
+        {
+          "label": "after_8MiB_receive",
+          "rss_delta": 38928384,
+          "python_bytes_delta": 4030,
+          "next_buffer_bytes": 65536
+        },
+        {
+          "label": "after_1000_small_messages",
+          "rss_delta": 38928384,
+          "python_bytes_delta": 4370,
+          "next_buffer_bytes": 65536
+        },
+        {
+          "label": "closed_client_still_referenced",
+          "rss_delta": 38961152,
+          "python_bytes_delta": 4777,
+          "next_buffer_bytes": 65536
+        }
+      ],
+      [
+        {
+          "label": "after_8MiB_receive",
+          "rss_delta": 38961152,
+          "python_bytes_delta": 4030,
+          "next_buffer_bytes": 65536
+        },
+        {
+          "label": "after_1000_small_messages",
+          "rss_delta": 38977536,
+          "python_bytes_delta": 4370,
+          "next_buffer_bytes": 65536
+        },
+        {
+          "label": "closed_client_still_referenced",
+          "rss_delta": 39010304,
+          "python_bytes_delta": 4777,
+          "next_buffer_bytes": 65536
+        }
+      ]
+    ]
+  },
+  "cancel": {
+    "main": [
+      [
+        {
+          "label": "50000_cancelled_receives",
+          "rss_delta": 11337728,
+          "python_bytes_delta": 6800712
+        },
+        {
+          "label": "next_message",
+          "rss_delta": 11337728,
+          "python_bytes_delta": 6801112,
+          "delivered_to_live_receiver": false
+        }
+      ],
+      [
+        {
+          "label": "50000_cancelled_receives",
+          "rss_delta": 11321344,
+          "python_bytes_delta": 6800712
+        },
+        {
+          "label": "next_message",
+          "rss_delta": 11337728,
+          "python_bytes_delta": 6801112,
+          "delivered_to_live_receiver": false
+        }
+      ],
+      [
+        {
+          "label": "50000_cancelled_receives",
+          "rss_delta": 11337728,
+          "python_bytes_delta": 6800712
+        },
+        {
+          "label": "next_message",
+          "rss_delta": 11337728,
+          "python_bytes_delta": 6801112,
+          "delivered_to_live_receiver": false
+        }
+      ]
+    ]
+  }
+}

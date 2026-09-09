@@ -1,0 +1,479 @@
+diff --git a/src/native_client/client.rs b/src/native_client/client.rs
+index 08cd5df..5567110 100644
+--- a/src/native_client/client.rs
++++ b/src/native_client/client.rs
+@@ -1366,7 +1366,7 @@ impl NativeClient {
+         self.park_tail_and_drain(py, outcome, data)
+     }
+ 
+-    fn data_received_inner(&self, py: Python<'_>, data: &[u8]) -> PyResult<()> {
++    pub(super) fn data_received_inner(&self, py: Python<'_>, data: &[u8]) -> PyResult<()> {
+         if self.fast_path_eligible() {
+             let outcome = self.scan_frame_aligned(py, data, PayloadMode::Copy)?;
+             return self.park_tail_and_drain(py, outcome, data);
+@@ -1380,7 +1380,7 @@ impl NativeClient {
+ 
+     /// Drain pending_callback_msgs and invoke the user callback for each.
+     /// Must be called with no outstanding borrow on State.
+-    fn flush_pending_callbacks(&self, py: Python<'_>) -> PyResult<()> {
++    pub(super) fn flush_pending_callbacks(&self, py: Python<'_>) -> PyResult<()> {
+         // `on_message` is fixed for the life of the connection (set in
+         // connect(), cleared only by close()), so one clone covers the loop.
+         let cb = {
+diff --git a/src/native_client/connect_helper.py b/src/native_client/connect_helper.py
+index 64cfd07..12cc22d 100644
+--- a/src/native_client/connect_helper.py
++++ b/src/native_client/connect_helper.py
+@@ -77,7 +77,7 @@ def _parse_proxy_uri(proxy):
+ 
+ 
+ async def _connect_helper(loop, protocol_factory, host, port, is_tls, ssl_ctx,
+-                          proxy, req_bytes, handshake_fut, client, connect_timeout):
++                          proxy, req_bytes, handshake_fut, client, connect_timeout, use_rustls=False):
+     async def _do():
+         kwargs = {}
+         if is_tls:
+@@ -103,9 +103,15 @@ async def _connect_helper(loop, protocol_factory, host, port, is_tls, ssl_ctx,
+                     s.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_NODELAY, 1)
+             except Exception:
+                 pass
+-        transport.write(bytes(req_bytes))
+-        await handshake_fut
+-        return client
++        if use_rustls:
++            transport = _proto
++        try:
++            transport.write(bytes(req_bytes))
++            await handshake_fut
++            return client
++        except BaseException:
++            transport.close()
++            raise
+     if connect_timeout is not None:
+         return await _asyncio.wait_for(_do(), timeout=connect_timeout)
+     return await _do()
+diff --git a/src/native_client/mod.rs b/src/native_client/mod.rs
+index e628eae..0cb9ed7 100644
+--- a/src/native_client/mod.rs
++++ b/src/native_client/mod.rs
+@@ -5,8 +5,8 @@
+ //! in Rust with AVX2-friendly masking.
+ //!
+ //! Current scope:
+-//! - ws:// plain TCP and wss:// TLS delegated to Python ssl; SOCKS5 via the
+-//!   embedded connect helper
++//! - ws:// plain TCP and wss:// TLS via Python ssl by default; experimental
++//!   same-thread rustls with tls_backend="rustls"; SOCKS5 via the connect helper
+ //! - Binary + Text messages, fragmented messages, permessage-deflate when
+ //!   negotiated
+ //! - Control frames: close, client ping, and server pings answered with a
+@@ -18,6 +18,7 @@
+ mod client;
+ mod codec;
+ mod protocol;
++mod rustls_transport;
+ 
+ use self::client::{NativeClient, NativeClientBuffered, State, WSMessage};
+ use self::protocol::{build_handshake, DeflateCtx};
+@@ -38,8 +39,11 @@ use crate::DEFAULT_CONNECT_TIMEOUT;
+ /// TLS is delegated to asyncio — we pass an ``ssl.SSLContext`` through to
+ /// ``loop.create_connection``, so the protocol sees decrypted bytes. If a
+ /// custom context is needed (self-signed, client cert), pass it via ``ssl_context``.
++/// Experimental ``tls_backend="rustls"`` keeps TLS on this thread in Rust and
++/// accepts ``rustls_ca_file`` instead; SSLContext and client-auth configuration
++/// are not supported by that prototype.
+ #[pyfunction]
+-#[pyo3(signature = (uri, *, headers=None, subprotocols=None, ssl_context=None, connect_timeout=None, receive_timeout=None, proxy=None, compression=false, on_message=None))]
++#[pyo3(signature = (uri, *, headers=None, subprotocols=None, ssl_context=None, connect_timeout=None, receive_timeout=None, proxy=None, compression=false, on_message=None, tls_backend="python", rustls_ca_file=None))]
+ #[allow(clippy::too_many_arguments)]
+ fn connect<'py>(
+     py: Python<'py>,
+@@ -52,9 +56,27 @@ fn connect<'py>(
+     proxy: Option<String>,
+     compression: bool,
+     on_message: Option<Py<PyAny>>,
++    tls_backend: &str,
++    rustls_ca_file: Option<String>,
+ ) -> PyResult<Bound<'py, PyAny>> {
+     let (scheme, host, port, path) = parse_ws_uri(&uri)?;
+     let is_tls = scheme == "wss";
++    if !matches!(tls_backend, "python" | "rustls") {
++        return Err(PyValueError::new_err(
++            "tls_backend must be python or rustls",
++        ));
++    }
++    let use_rustls = tls_backend == "rustls";
++    if use_rustls && (!is_tls || ssl_context.is_some()) {
++        return Err(PyValueError::new_err(
++            "rustls requires wss:// and does not accept ssl_context; use rustls_ca_file",
++        ));
++    }
++    if !use_rustls && rustls_ca_file.is_some() {
++        return Err(PyValueError::new_err(
++            "rustls_ca_file requires tls_backend=rustls",
++        ));
++    }
+     let headers = headers.unwrap_or_default();
+     let subprotocols = subprotocols.unwrap_or_default();
+     let (req_bytes, expected_accept) =
+@@ -106,6 +128,20 @@ fn connect<'py>(
+         Py::new(py, (NativeClientBuffered, client))?.into_any()
+     };
+ 
++    let protocol_obj = if use_rustls {
++        Py::new(
++            py,
++            rustls_transport::RustlsTransport::new(
++                client_obj.bind(py).extract::<Py<NativeClient>>()?,
++                host.clone(),
++                rustls_ca_file,
++            )?,
++        )?
++        .into_any()
++    } else {
++        client_obj.clone_ref(py)
++    };
++
+     // Create the handshake future. Cache `loop.create_future` and
+     // `asyncio.wait_for` bound methods so the recv/anext hot paths don't
+     // need to re-resolve them.
+@@ -124,7 +160,7 @@ fn connect<'py>(
+ 
+     // Launch the low-level create_connection + post-connection handshake send as a task
+     let protocol_factory = {
+-        let client_clone = client_obj.clone_ref(py);
++        let client_clone = protocol_obj.clone_ref(py);
+         pyo3::types::PyCFunction::new_closure(
+             py,
+             None,
+@@ -136,7 +172,7 @@ fn connect<'py>(
+     };
+ 
+     // Resolve SSL context if wss:// (user-supplied overrides default).
+-    let ssl_arg: Py<PyAny> = if is_tls {
++    let ssl_arg: Py<PyAny> = if is_tls && !use_rustls {
+         match ssl_context {
+             Some(ctx) => ctx,
+             None => py
+@@ -166,13 +202,14 @@ fn connect<'py>(
+         protocol_factory,
+         host.clone(),
+         port,
+-        is_tls,
++        is_tls && !use_rustls,
+         ssl_obj,
+         proxy_obj,
+         req_bytes,
+         handshake_fut,
+         client_obj,
+         timeout_obj,
++        use_rustls,
+     ))
+ }
+ 
+diff --git a/src/native_client/rustls_transport.rs b/src/native_client/rustls_transport.rs
+new file mode 100644
+index 0000000..c7b0c8c
+--- /dev/null
++++ b/src/native_client/rustls_transport.rs
+@@ -0,0 +1,300 @@
++//! Experimental same-thread rustls transport. No Tokio tasks or Python plaintext buffers.
++use std::cell::RefCell;
++use std::io::{Read, Write};
++use std::sync::Arc;
++
++use pyo3::exceptions::{PyConnectionError, PyValueError};
++use pyo3::prelude::*;
++use pyo3::types::PyBytes;
++
++use super::client::NativeClient;
++
++struct State {
++    tls: rustls::ClientConnection,
++    inner: Option<Py<NativeClient>>,
++    transport: Option<Py<PyAny>>,
++    plaintext: Vec<u8>,
++    ciphertext: Vec<u8>,
++    closing: bool,
++}
++
++#[pyclass(unsendable)]
++pub(super) struct RustlsTransport {
++    state: RefCell<State>,
++}
++
++impl RustlsTransport {
++    pub(super) fn new(
++        inner: Py<NativeClient>,
++        host: String,
++        ca_file: Option<String>,
++    ) -> PyResult<Self> {
++        let config = if let Some(path) = ca_file {
++            let pem = std::fs::read(path).map_err(io_error)?;
++            let mut roots = rustls::RootCertStore::empty();
++            for cert in rustls_pemfile::certs(&mut pem.as_slice()) {
++                roots
++                    .add(cert.map_err(io_error)?)
++                    .map_err(|e| PyValueError::new_err(e.to_string()))?;
++            }
++            if roots.is_empty() {
++                return Err(PyValueError::new_err(
++                    "rustls_ca_file contains no certificates",
++                ));
++            }
++            Arc::new(
++                rustls::ClientConfig::builder()
++                    .with_root_certificates(roots)
++                    .with_no_client_auth(),
++            )
++        } else {
++            crate::sync_client::build_rustls_client_config()?
++        };
++        let name = rustls::pki_types::ServerName::try_from(host)
++            .map_err(|e| PyValueError::new_err(e.to_string()))?;
++        let mut tls = rustls::ClientConnection::new(config, name)
++            .map_err(|e| PyValueError::new_err(e.to_string()))?;
++        // write() is synchronous and must consume a complete WebSocket frame.
++        // The raw transport + NativeClient apply their existing write watermarks.
++        tls.set_buffer_limit(None);
++        Ok(Self {
++            state: RefCell::new(State {
++                tls,
++                inner: Some(inner),
++                transport: None,
++                plaintext: Vec::new(),
++                ciphertext: Vec::new(),
++                closing: false,
++            }),
++        })
++    }
++
++    fn flush(&self, py: Python<'_>) -> PyResult<()> {
++        let (mut out, transport) = {
++            let mut st = self.state.borrow_mut();
++            let mut out = std::mem::take(&mut st.ciphertext);
++            out.clear();
++            while st.tls.wants_write() {
++                st.tls.write_tls(&mut out).map_err(io_error)?;
++            }
++            (out, st.transport.as_ref().map(|t| t.clone_ref(py)))
++        };
++        // Do not hold TLS state across transport calls: pause_writing can re-enter.
++        let result = if let Some(t) = transport {
++            if out.is_empty() {
++                Ok(())
++            } else {
++                t.bind(py)
++                    .call_method1("write", (PyBytes::new(py, &out),))
++                    .map(|_| ())
++            }
++        } else {
++            Ok(())
++        };
++        out.clear();
++        self.state.borrow_mut().ciphertext = out;
++        result
++    }
++
++    fn fail(&self, py: Python<'_>, err: PyErr) -> PyResult<()> {
++        let (inner, transport) = {
++            let mut st = self.state.borrow_mut();
++            st.closing = true;
++            (
++                st.inner.as_ref().map(|c| c.clone_ref(py)),
++                st.transport.as_ref().map(|t| t.clone_ref(py)),
++            )
++        };
++        if let Some(c) = inner {
++            let fut = c.borrow(py).state.borrow_mut().handshake_fut.take();
++            if let Some(f) = fut {
++                if !f.bind(py).call_method0("done")?.is_truthy()? {
++                    f.bind(py).call_method1("set_exception", (err.value(py),))?;
++                }
++            }
++        }
++        if let Some(t) = transport {
++            t.bind(py).call_method0("abort")?;
++        }
++        Ok(())
++    }
++}
++
++fn io_error(e: std::io::Error) -> PyErr {
++    PyConnectionError::new_err(e.to_string())
++}
++
++#[pymethods]
++impl RustlsTransport {
++    fn connection_made(slf: PyRef<'_, Self>, py: Python<'_>, transport: Py<PyAny>) -> PyResult<()> {
++        let inner = {
++            let mut st = slf.state.borrow_mut();
++            st.transport = Some(transport);
++            st.inner.as_ref().unwrap().clone_ref(py)
++        };
++        inner
++            .bind(py)
++            .call_method1("connection_made", (slf.into_pyobject(py)?,))?;
++        // ClientHello is emitted by the first write() from the connect helper.
++        Ok(())
++    }
++
++    fn data_received(&self, py: Python<'_>, data: &[u8]) -> PyResult<()> {
++        if self.state.borrow().closing {
++            return Ok(());
++        }
++        let decoded: PyResult<(Vec<u8>, bool)> = (|| {
++            let mut st = self.state.borrow_mut();
++            let mut input = data;
++            let mut plain = std::mem::take(&mut st.plaintext);
++            plain.clear();
++            let mut peer_closed = false;
++            while !input.is_empty() {
++                let n = st.tls.read_tls(&mut input).map_err(io_error)?;
++                if n == 0 {
++                    break;
++                }
++                let io = st.tls.process_new_packets().map_err(|e| {
++                    if matches!(e, rustls::Error::InvalidCertificate(_)) {
++                        match py
++                            .import("ssl")
++                            .and_then(|m| m.getattr("SSLCertVerificationError"))
++                            .and_then(|t| t.call1((e.to_string(),)))
++                        {
++                            Ok(value) => PyErr::from_value(value),
++                            Err(error) => error,
++                        }
++                    } else {
++                        PyConnectionError::new_err(e.to_string())
++                    }
++                })?;
++                peer_closed |= io.peer_has_closed();
++                match st.tls.reader().read_to_end(&mut plain) {
++                    Ok(_) => (),
++                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
++                    Err(e) => return Err(io_error(e)),
++                }
++            }
++            Ok((plain, peer_closed))
++        })();
++        let (mut plain, peer_closed) = match decoded {
++            Ok(v) => v,
++            Err(e) => return self.fail(py, e),
++        };
++        self.flush(py)?;
++        let inner = self.state.borrow().inner.as_ref().map(|c| c.clone_ref(py));
++        if let Some(c) = inner {
++            let c = c.borrow(py);
++            if !plain.is_empty() {
++                c.data_received_inner(py, &plain)?;
++                c.flush_pending_callbacks(py)?;
++            }
++        }
++        plain.clear();
++        self.state.borrow_mut().plaintext = plain;
++        if peer_closed {
++            self.close(py)?;
++        }
++        Ok(())
++    }
++
++    fn write(&self, py: Python<'_>, data: &[u8]) -> PyResult<()> {
++        {
++            let mut st = self.state.borrow_mut();
++            if st.closing {
++                return Err(PyConnectionError::new_err("TLS transport is closing"));
++            }
++            st.tls.writer().write_all(data).map_err(io_error)?;
++        }
++        self.flush(py)
++    }
++
++    #[pyo3(signature = (name, default=None))]
++    fn get_extra_info(
++        &self,
++        py: Python<'_>,
++        name: &str,
++        default: Option<Py<PyAny>>,
++    ) -> PyResult<Py<PyAny>> {
++        // NativeClient must never bypass TLS by writing directly to the socket fd.
++        if name == "ssl_object" {
++            return Ok(true.into_pyobject(py)?.to_owned().into_any().unbind());
++        }
++        let t = self
++            .state
++            .borrow()
++            .transport
++            .as_ref()
++            .map(|t| t.clone_ref(py));
++        match t {
++            Some(t) => Ok(t
++                .bind(py)
++                .call_method1("get_extra_info", (name, default))?
++                .unbind()),
++            None => Ok(default.unwrap_or_else(|| py.None())),
++        }
++    }
++
++    fn get_write_buffer_size(&self, py: Python<'_>) -> PyResult<usize> {
++        let t = self
++            .state
++            .borrow()
++            .transport
++            .as_ref()
++            .map(|t| t.clone_ref(py));
++        match t {
++            Some(t) => t.bind(py).call_method0("get_write_buffer_size")?.extract(),
++            None => Ok(0),
++        }
++    }
++
++    fn pause_writing(&self, py: Python<'_>) -> PyResult<()> {
++        let c = self.state.borrow().inner.as_ref().map(|c| c.clone_ref(py));
++        if let Some(c) = c {
++            c.bind(py).call_method0("pause_writing")?;
++        }
++        Ok(())
++    }
++
++    fn resume_writing(&self, py: Python<'_>) -> PyResult<()> {
++        let c = self.state.borrow().inner.as_ref().map(|c| c.clone_ref(py));
++        if let Some(c) = c {
++            c.bind(py).call_method0("resume_writing")?;
++        }
++        Ok(())
++    }
++
++    fn eof_received(&self) -> bool {
++        false
++    }
++
++    fn close(&self, py: Python<'_>) -> PyResult<()> {
++        let transport = {
++            let mut st = self.state.borrow_mut();
++            if st.closing {
++                return Ok(());
++            }
++            st.closing = true;
++            st.tls.send_close_notify();
++            st.transport.as_ref().map(|t| t.clone_ref(py))
++        };
++        self.flush(py)?;
++        if let Some(t) = transport {
++            t.bind(py).call_method0("close")?;
++        }
++        Ok(())
++    }
++
++    fn connection_lost(&self, py: Python<'_>, exc: Py<PyAny>) -> PyResult<()> {
++        let inner = {
++            let mut st = self.state.borrow_mut();
++            st.closing = true;
++            st.transport = None;
++            st.inner.take()
++        };
++        if let Some(c) = inner {
++            c.bind(py).call_method1("connection_lost", (exc,))?;
++        }
++        Ok(())
++    }
++}

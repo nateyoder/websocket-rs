@@ -1,0 +1,16 @@
+{
+  "main_python_tests": 185,
+  "main_rust_unit_tests": 19,
+  "variant_python_tests_each": 185,
+  "variants": [
+    "small_copy",
+    "compression_fast",
+    "eagain_reuse",
+    "recv_reclaim"
+  ],
+  "cargo_fmt": "pass",
+  "cargo_clippy_deny_warnings": "pass",
+  "audit_python_ruff": "pass",
+  "known_issue_probes_main": "6 expected failures, confirmed again with --runxfail",
+  "production_sources": "unchanged from audited commit"
+}

@@ -1,0 +1,200 @@
+{
+  "raw": {
+    "256": {
+      "native": [
+        {
+          "count": 497036,
+          "duration": 10.0,
+          "rps": 49703.6
+        },
+        {
+          "count": 501018,
+          "duration": 10.0,
+          "rps": 50101.8
+        },
+        {
+          "count": 504594,
+          "duration": 10.0,
+          "rps": 50459.4
+        },
+        {
+          "count": 429326,
+          "duration": 10.0,
+          "rps": 42932.6
+        },
+        {
+          "count": 465416,
+          "duration": 10.0,
+          "rps": 46541.6
+        },
+        {
+          "count": 625871,
+          "duration": 10.0,
+          "rps": 62587.1
+        },
+        {
+          "count": 604161,
+          "duration": 10.0,
+          "rps": 60416.1
+        }
+      ],
+      "picows": [
+        {
+          "count": 478220,
+          "duration": 10.0,
+          "rps": 47822.0
+        },
+        {
+          "count": 471656,
+          "duration": 10.0,
+          "rps": 47165.6
+        },
+        {
+          "count": 473337,
+          "duration": 10.0,
+          "rps": 47333.7
+        },
+        {
+          "count": 374170,
+          "duration": 10.0,
+          "rps": 37417.0
+        },
+        {
+          "count": 459447,
+          "duration": 10.0,
+          "rps": 45944.7
+        },
+        {
+          "count": 556802,
+          "duration": 10.0,
+          "rps": 55680.2
+        },
+        {
+          "count": 305336,
+          "duration": 10.0,
+          "rps": 30533.6
+        }
+      ]
+    },
+    "1048576": {
+      "native": [
+        {
+          "count": 36393,
+          "duration": 10.0,
+          "rps": 3639.3
+        },
+        {
+          "count": 40243,
+          "duration": 10.0,
+          "rps": 4024.3
+        },
+        {
+          "count": 20485,
+          "duration": 10.0,
+          "rps": 2048.5
+        },
+        {
+          "count": 41947,
+          "duration": 10.0,
+          "rps": 4194.7
+        },
+        {
+          "count": 41997,
+          "duration": 10.0,
+          "rps": 4199.7
+        },
+        {
+          "count": 42391,
+          "duration": 10.0,
+          "rps": 4239.1
+        },
+        {
+          "count": 24398,
+          "duration": 10.0,
+          "rps": 2439.8
+        }
+      ],
+      "picows": [
+        {
+          "count": 41097,
+          "duration": 10.0,
+          "rps": 4109.7
+        },
+        {
+          "count": 39472,
+          "duration": 10.0,
+          "rps": 3947.2
+        },
+        {
+          "count": 29521,
+          "duration": 10.0,
+          "rps": 2952.1
+        },
+        {
+          "count": 35301,
+          "duration": 10.0,
+          "rps": 3530.1
+        },
+        {
+          "count": 44133,
+          "duration": 10.0,
+          "rps": 4413.3
+        },
+        {
+          "count": 45449,
+          "duration": 10.0,
+          "rps": 4544.9
+        },
+        {
+          "count": 34837,
+          "duration": 10.0,
+          "rps": 3483.7
+        }
+      ]
+    }
+  },
+  "summary": {
+    "256": {
+      "arms": [
+        "native",
+        "picows"
+      ],
+      "comparison": {
+        "rounds": 7,
+        "baseline_median_ns": 21201.89290499856,
+        "candidate_median_ns": 19959.362737466516,
+        "paired_speedup_pct": 6.603540395109619,
+        "speedup_95ci_pct": [
+          3.9345907741207053,
+          14.740893176898195
+        ],
+        "wins": 7
+      },
+      "median_rps": {
+        "native": 50101.8,
+        "picows": 47165.6
+      }
+    },
+    "1048576": {
+      "arms": [
+        "native",
+        "picows"
+      ],
+      "comparison": {
+        "rounds": 7,
+        "baseline_median_ns": 253344.14268342117,
+        "candidate_median_ns": 248490.42069428222,
+        "paired_speedup_pct": -6.728420867345797,
+        "speedup_95ci_pct": [
+          -29.965266814019575,
+          1.9532833400891958
+        ],
+        "wins": 2
+      },
+      "median_rps": {
+        "native": 4024.3,
+        "picows": 3947.2
+      }
+    }
+  }
+}

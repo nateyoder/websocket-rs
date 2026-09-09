@@ -9,6 +9,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`wss://` now goes through aiofastnet when it is installed.** A new
+  `tls_backend=` keyword on the native `connect()` selects the transport that
+  carries TLS: `"auto"` (default) prefers [aiofastnet](https://pypi.org/project/aiofastnet/)
+  and falls back to `loop.create_connection` when it is not importable,
+  `"asyncio"` pins the stdlib path, `"aiofastnet"` requires it and raises
+  `RuntimeError` otherwise, and `"rustls"` selects the experimental same-thread
+  Rust TLS backend. The keyword is ignored for `ws://`, which keeps the asyncio
+  `BufferedProtocol` fast path. aiofastnet stays an optional dependency —
+  install it with the new `fast-tls` extra; a missing install costs performance,
+  not correctness. Measured `tls_backend="asyncio"` against `"auto"` in
+  this build over 15 alternating paired rounds, 3 measured seconds per cell,
+  fresh interpreter per cell, verified TLS against the repository's Rust echo
+  server on CPython 3.13.14 + uvloop / macOS ARM64: **+13.10%** request
+  throughput at 256 B [+10.86, +15.93] and **+11.70%** at 8 KiB [+10.90,
+  +13.00], winning 15/15 rounds in both cells. Loopback, one host, one
+  request-response workload; no WAN, tail-latency or memory claim follows.
+  Reproduce with `tests/bench_tls_backends.py`. The audit that motivated the
+  change measured +10.60% and +9.32% on an isolated patch build, with client CPU
+  falling 13.06 → 10.77 µs/request and 17.28 → 15.14; see
+  `docs/performance-audit/TLS-OPTIMIZATION.md`. Usage in `docs/TLS-BACKENDS.md`.
+- Experimental same-thread rustls TLS transport behind the off-by-default
+  `rustls-transport` cargo feature, reachable as `tls_backend="rustls"` with
+  `rustls_ca_file=` in place of `ssl_context=`. It terminates TLS in Rust on the
+  event-loop thread and hands decrypted buffers straight to the Rust parser — no
+  Tokio tasks and no Python plaintext buffers — as a first step toward one Rust
+  package for TLS and framing. **It is not yet a win overall**: measured against
+  `tls_backend="auto"` in this build over 15 paired rounds it is **+5.80%** at
+  256 B [+5.47, +7.61] (14/15 rounds) but **−3.30%** at 8 KiB [−3.99, −2.90]
+  (1/15), so it ships off. Lower per-message overhead, higher per-byte cost —
+  the shape expected from the copies the prototype still makes. Rationale and
+  next experiments in `docs/performance-audit/RUSTLS-PROTOTYPE.md` and
+  FOLLOWUPS F9.
+- `tests/test_control_frames.py` drives the client as a bare `asyncio.Protocol`
+  over a stub transport — no sockets, no timing — to pin control-frame
+  behaviour deterministically: a server Ping is answered even while writing is
+  paused, queued sends survive the Pong overtaking them in order, the Pong
+  echoes the Ping payload byte-for-byte at every length 0–125, several Pings in
+  one chunk are all answered, and a Ping split across two reads is answered once
+  whole. Written while investigating an intermittent unanswered-Ping stall
+  (FOLLOWUPS F13) that these invariants turned out not to explain; they now
+  guard against a regression in any of them appearing as a load-dependent flake.
+- `tests/test_tls_backends.py` gives the suite its first `wss://` coverage:
+  fragment reassembly, protocol ping/pong, 32-message ordering, a 256 KiB
+  multi-record payload and untrusted-certificate rejection, run against every
+  backend available in the build. These also pin the invariant that the
+  raw-socket send fast path stays disabled on TLS connections — a leak there
+  would put plaintext on the wire and every round-trip assertion would fail.
+- Full performance audit of 0.7.11 under `docs/performance-audit/`, covering
+  canceled-receiver retention, queue backpressure, zero-copy retention
+  amplification, compression policy and buffer reclamation. Those findings are
+  not addressed by this change.
+
+### Changed
+
+- The native connect helper module is compiled at import instead of on the first
+  `connect()`, and is registered as `websocket_rs._native_connect_helper` so its
+  TLS backend selection is reachable for tests.
+
+### Added
+
 - Native async `ping_waiter(payload)` sends a protocol Ping and returns an
   `asyncio.Future[None]` for its matching Pong. Caller-owned deadlines work on
   quiet or streaming TCP/TLS connections; distinct concurrent probes correlate

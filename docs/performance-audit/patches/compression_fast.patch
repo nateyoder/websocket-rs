@@ -1,0 +1,13 @@
+diff --git a/src/native_client/client.rs b/src/native_client/client.rs
+index 08cd5df..112f48a 100644
+--- a/src/native_client/client.rs
++++ b/src/native_client/client.rs
+@@ -711,7 +711,7 @@ impl NativeClient {
+         // up front so compress_vec finishes in a single call.
+         let compressed = st.deflate.is_some();
+         let deflate_buf: Vec<u8> = if compressed {
+-            let mut comp = Compress::new(Compression::default(), false);
++            let mut comp = Compress::new(Compression::fast(), false);
+             // Worst case: small overhead on random data; highly compressible
+             // data is much smaller. +64 covers header + sync marker + slack.
+             let mut out: Vec<u8> = Vec::with_capacity(raw_payload.len() + 64);

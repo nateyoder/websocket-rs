@@ -1,0 +1,11 @@
+{
+  "main": {
+    "sha256": "eec2ac69e04c107748d829367d8241c5ce805a71bb50a63ec0a94eef8225b2ba"
+  },
+  "tls_aiofastnet": {
+    "sha256": "e05f58496e22e4510edf93a757c0bffbf5761d838e8febfe2cfd02ba8b6eebf5"
+  },
+  "rustls": {
+    "sha256": "c6f1b3a41adb2467d4ae00eb13ed6d16805cd1a3c321e68af2bb94c8f257e1f1"
+  }
+}

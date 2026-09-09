@@ -1,0 +1,200 @@
+{
+  "raw": {
+    "256": {
+      "native": [
+        {
+          "count": 48938,
+          "duration": 1.0,
+          "rps": 48938.0
+        },
+        {
+          "count": 47760,
+          "duration": 1.0,
+          "rps": 47760.0
+        },
+        {
+          "count": 47736,
+          "duration": 1.0,
+          "rps": 47736.0
+        },
+        {
+          "count": 48691,
+          "duration": 1.0,
+          "rps": 48691.0
+        },
+        {
+          "count": 49769,
+          "duration": 1.0,
+          "rps": 49769.0
+        },
+        {
+          "count": 48254,
+          "duration": 1.0,
+          "rps": 48254.0
+        },
+        {
+          "count": 49196,
+          "duration": 1.0,
+          "rps": 49196.0
+        }
+      ],
+      "native_control": [
+        {
+          "count": 50631,
+          "duration": 1.0,
+          "rps": 50631.0
+        },
+        {
+          "count": 48274,
+          "duration": 1.0,
+          "rps": 48274.0
+        },
+        {
+          "count": 47390,
+          "duration": 1.0,
+          "rps": 47390.0
+        },
+        {
+          "count": 47983,
+          "duration": 1.0,
+          "rps": 47983.0
+        },
+        {
+          "count": 50713,
+          "duration": 1.0,
+          "rps": 50713.0
+        },
+        {
+          "count": 48944,
+          "duration": 1.0,
+          "rps": 48944.0
+        },
+        {
+          "count": 48410,
+          "duration": 1.0,
+          "rps": 48410.0
+        }
+      ]
+    },
+    "1048576": {
+      "native": [
+        {
+          "count": 3792,
+          "duration": 1.0,
+          "rps": 3792.0
+        },
+        {
+          "count": 3322,
+          "duration": 1.0,
+          "rps": 3322.0
+        },
+        {
+          "count": 3559,
+          "duration": 1.0,
+          "rps": 3559.0
+        },
+        {
+          "count": 3310,
+          "duration": 1.0,
+          "rps": 3310.0
+        },
+        {
+          "count": 4044,
+          "duration": 1.0,
+          "rps": 4044.0
+        },
+        {
+          "count": 4011,
+          "duration": 1.0,
+          "rps": 4011.0
+        },
+        {
+          "count": 3278,
+          "duration": 1.0,
+          "rps": 3278.0
+        }
+      ],
+      "native_control": [
+        {
+          "count": 3785,
+          "duration": 1.0,
+          "rps": 3785.0
+        },
+        {
+          "count": 3466,
+          "duration": 1.0,
+          "rps": 3466.0
+        },
+        {
+          "count": 2873,
+          "duration": 1.0,
+          "rps": 2873.0
+        },
+        {
+          "count": 2597,
+          "duration": 1.0,
+          "rps": 2597.0
+        },
+        {
+          "count": 3968,
+          "duration": 1.0,
+          "rps": 3968.0
+        },
+        {
+          "count": 3879,
+          "duration": 1.0,
+          "rps": 3879.0
+        },
+        {
+          "count": 3724,
+          "duration": 1.0,
+          "rps": 3724.0
+        }
+      ]
+    }
+  },
+  "summary": {
+    "256": {
+      "arms": [
+        "native",
+        "native_control"
+      ],
+      "comparison": {
+        "rounds": 7,
+        "baseline_median_ns": 20537.676367295804,
+        "candidate_median_ns": 20656.88907250568,
+        "paired_speedup_pct": 1.076214405360143,
+        "speedup_95ci_pct": [
+          -1.4540674868045445,
+          1.8967630452691564
+        ],
+        "wins": 4
+      },
+      "median_rps": {
+        "native": 48691.0,
+        "native_control": 48410.0
+      }
+    },
+    "1048576": {
+      "arms": [
+        "native",
+        "native_control"
+      ],
+      "comparison": {
+        "rounds": 7,
+        "baseline_median_ns": 280977.8027535825,
+        "candidate_median_ns": 268528.46401718585,
+        "paired_speedup_pct": -1.879327398615227,
+        "speedup_95ci_pct": [
+          -19.275077268895757,
+          4.334738109572545
+        ],
+        "wins": 2
+      },
+      "median_rps": {
+        "native": 3559.0,
+        "native_control": 3724.0
+      }
+    }
+  }
+}
