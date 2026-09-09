@@ -181,8 +181,12 @@ impl RustlsTransport {
                     if plain.len() < used + want {
                         plain.resize(used + want, 0);
                     }
-                    match st.tls.reader().read_exact(&mut plain[used..used + want]) {
-                        Ok(()) => used += want,
+                    // `read` rather than `read_exact`: a short read advances
+                    // `used` by exactly what was copied, and the remainder is
+                    // re-reported by the next `plaintext_bytes_to_read()`, so
+                    // no already-consumed plaintext can be dropped.
+                    match st.tls.reader().read(&mut plain[used..used + want]) {
+                        Ok(n) => used += n,
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
                         Err(e) => return Err(io_error(e)),
                     }

@@ -10,16 +10,32 @@ DONE (with the closing PR) once merged.
   token validation before splicing.
   Source: PR #45 correctness review (confidence 15, not a regression).
 
-- [ ] F9: The rustls transport wins at 256 B (+5.80% [+5.47, +7.61], 14/15
-  rounds) and loses at 8 KiB (−3.30% [−3.99, −2.90], 1/15) against
+- [ ] F9: The rustls transport wins at 256 B (+6.02% [+5.77, +7.68], 14/15
+  rounds) and loses at 8 KiB (−2.71% [−2.92, −2.05]) against
   `tls_backend="auto"`, which is what keeps it behind the `rustls-transport`
-  feature. Lower per-message overhead, higher per-byte cost. The
-  path still copies through rustls's buffered reader, a reusable plaintext `Vec`
-  and owned message payloads, and materializes outbound ciphertext for the
-  asyncio transport. Next experiments = rustls's unbuffered interface and
-  eliminating those copies. Nothing yet establishes that copies *caused* the
-  regression; a buffer-lifetime redesign needs its own tests. This is the
-  blocker for doing TLS and framing in one Rust package.
+  feature. Lower per-message overhead, higher per-byte cost. Figures are
+  post-PR #7, which removed the per-message memset in the plaintext read
+  (previously +5.80% / −3.30%); a re-measurement at 9 rounds reproduced the
+  signs with intervals too wide to confirm the point estimates, and the host is
+  intermittently noisy, so treat either run as directional.
+  **Attribution.** The remaining 8 KiB gap profiles as memmove: 535 samples
+  against aiofastnet's 294, i.e. the two staging copies the *buffered* rustls
+  API makes (`read_tls` into rustls's own buffer, then a copy back out).
+  Plaintext still copies again into owned message payloads, and outbound
+  ciphertext is still materialized for the asyncio transport.
+  **Measured negative, do not re-run without a new hypothesis:** swapping the
+  crypto provider ring → aws-lc-rs measured +6.35% / −3.51%, indistinguishable
+  from ring, with comparable AES kernels in the profile. The provider is not
+  the gap.
+  **Unbuffered rustls is not yet worth it.** Stable rustls 0.23.40 does *not*
+  decrypt in place: `ReadTraffic` holds `_incoming_tls` unused "for forwards
+  compatibility" and `next_record()` pops an owned `Vec` off
+  `received_plaintext`, with a source comment marking in-place decryption as
+  future work. So the unbuffered rewrite would remove only the ciphertext
+  staging copy — roughly 1 percentage point — and none of the plaintext
+  copies, at a cost of ~400 lines of state machine. Revisit when rustls ships
+  in-place decryption. This is the blocker for doing TLS and framing in one
+  Rust package.
 
 - [x] F10: **Measured, not a win. Do not re-run without a new hypothesis.**
   Routing `wss://` through `NativeClientBuffered` on the aiofastnet transport
