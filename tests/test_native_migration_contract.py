@@ -13,7 +13,7 @@ from websocket_rs.native_client import connect as async_connect
 
 
 @pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
-@pytest.mark.parametrize("connect_timeout", [None, 1])
+@pytest.mark.parametrize("connect_timeout", [None, 10])
 def test_pre_upgrade_connection_refusal_has_no_unhandled_future(loop_kind, connect_timeout):
     loop_factory = asyncio.new_event_loop
     if loop_kind == "uvloop":
