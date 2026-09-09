@@ -69,6 +69,17 @@ impl PingCleanup {
 /// the scan costs more than the entries it could reclaim.
 pub(crate) const RECV_SWEEP_MIN: usize = 32;
 
+/// Default payload size at or above which payloads are handed out as
+/// `Bytes::slice` of the receive buffer instead of being copied.
+///
+/// A slice keeps its entire backing chunk alive, so a small message retained by
+/// the consumer pins a whole read's worth of buffer (tens of KiB). Copying below
+/// this size costs little and bounds that exposure; above it the copy is the
+/// dominant per-message cost. Callers who drop payloads promptly can lower it
+/// via `connect(zero_copy_min_bytes=...)`; callers who retain them should raise
+/// it.
+pub(crate) const ZERO_COPY_MIN_PAYLOAD: usize = 4096;
+
 fn shrink_pings(pings: &mut PingRegistry) {
     // Amortized reclamation after bursts; retain a small heartbeat-sized table.
     if pings.capacity() > 64 && pings.len() < pings.capacity() / 4 {
@@ -126,13 +137,19 @@ pub(crate) struct State {
     /// directly, skipping the per-recv `bytes` object allocation that the
     /// plain `data_received` path incurs. Sized to one large frame; grows on
     /// demand if a single recv would overrun. Mirrors picows' `_read_buffer`.
-    pub(crate) recv_buf: Vec<u8>,
-    /// Write cursor into `recv_buf`. `recv_buf[..recv_pos]` contains data
-    /// uvloop has delivered but we haven't fully consumed (i.e. a partial
-    /// frame at the tail). `get_buffer` exposes `recv_buf[recv_pos..]` so
-    /// kernel writes append; `buffer_updated` advances `recv_pos`, parses
-    /// complete frames in place, then compacts the leftover to offset 0.
-    pub(crate) recv_pos: usize,
+    /// Receive buffer the loop writes into directly. `recv_buf[..len]` is
+    /// received data not yet parsed (a partial frame at the tail); `get_buffer`
+    /// exposes the spare capacity past it so kernel writes append, and
+    /// `buffer_updated` extends the length, parses, and keeps the remainder.
+    ///
+    /// `BytesMut` rather than `Vec` so a parse pass can `split_to().freeze()`
+    /// the received region and hand message payloads out as `Bytes::slice` of
+    /// it -- a refcount bump -- instead of copying each one. The split is O(1)
+    /// and the allocation is shared, so buffer reuse is amortized across reads.
+    pub(crate) recv_buf: BytesMut,
+    /// Payload size at or above which payloads are sliced from the receive
+    /// buffer rather than copied. See [`ZERO_COPY_MIN_PAYLOAD`].
+    pub(crate) zero_copy_min: usize,
     /// If the previous parse pass ended on a partial frame, holds the total
     /// byte count needed before the next parse pass can yield anything.
     /// Lets `buffer_updated` skip the parse loop entirely for chunks that
@@ -1355,6 +1372,20 @@ impl NativeClient {
                 OP_TEXT | OP_BINARY => {
                     let payload = match mode {
                         PayloadMode::Copy => Bytes::copy_from_slice(frame.payload),
+                        PayloadMode::ZeroCopyOwned { owner } => {
+                            // A slice pins its whole backing chunk, so a small
+                            // retained message would hold the entire read
+                            // buffer. Below the threshold the copy is both
+                            // cheap and the memory-safe choice; above it the
+                            // copy is what we are here to remove.
+                            if frame.payload.len() < state.zero_copy_min {
+                                Bytes::copy_from_slice(frame.payload)
+                            } else {
+                                owner.slice(
+                                    frame.payload_start..frame.payload_start + frame.payload.len(),
+                                )
+                            }
+                        }
                         PayloadMode::ZeroCopy { pb } => {
                             // PyBytes is immutable, so the pointer stays
                             // valid as long as the PyBytesOwner refcount
@@ -1446,12 +1477,13 @@ impl NativeClient {
     /// Returns `(consumed, next_frame_needed)`; `Some(N)` means the caller's
     /// `recv_pos` must reach `N` before the next parse pass can finish the
     /// partial frame.
-    fn parse_recv_data(&self, py: Python<'_>, data: &[u8]) -> PyResult<(usize, Option<usize>)> {
+    fn parse_recv_data(&self, py: Python<'_>, owner: &Bytes) -> PyResult<(usize, Option<usize>)> {
+        let data: &[u8] = owner;
         if !self.fast_path_eligible() {
             self.data_received_inner(py, data)?;
             return Ok((data.len(), None));
         }
-        let outcome = self.scan_frame_aligned(py, data, PayloadMode::Copy)?;
+        let outcome = self.scan_frame_aligned(py, data, PayloadMode::ZeroCopyOwned { owner })?;
         match outcome {
             ScanOutcome::Exhausted { consumed } | ScanOutcome::Stopped { consumed } => {
                 Ok((consumed, None))
@@ -1552,21 +1584,14 @@ impl NativeClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let mut st = self.state.borrow_mut();
         const HEADROOM: usize = 65536;
-        let need = st.recv_pos + HEADROOM;
-        if st.recv_buf.capacity() < need {
-            let extra = need - st.recv_buf.capacity();
-            st.recv_buf.reserve(extra);
-        }
-        let cap = st.recv_buf.capacity();
-        // SAFETY: bytes between len() and capacity() are uninitialized but
-        // we only ever *read* the first `nbytes` past `recv_pos` — and only
-        // after `buffer_updated_impl(nbytes)` confirms uvloop wrote them.
-        unsafe {
-            st.recv_buf.set_len(cap);
-        }
-        let recv_pos = st.recv_pos;
-        let ptr = unsafe { st.recv_buf.as_mut_ptr().add(recv_pos) };
-        let avail = cap - recv_pos;
+        // reserve() guarantees capacity for len() + HEADROOM more bytes.
+        st.recv_buf.reserve(HEADROOM);
+        let len = st.recv_buf.len();
+        let avail = st.recv_buf.capacity() - len;
+        // SAFETY: the bytes from len() to capacity() are uninitialized, and we
+        // only read them after `buffer_updated_impl(nbytes)` reports how many
+        // the loop actually wrote.
+        let ptr = unsafe { st.recv_buf.as_mut_ptr().add(len) };
         drop(st);
         unsafe {
             let mv = pyo3::ffi::PyMemoryView_FromMemory(
@@ -1582,31 +1607,37 @@ impl NativeClient {
     }
 
     fn buffer_updated_impl(&self, py: Python<'_>, nbytes: usize) -> PyResult<()> {
-        // Defer-parse gate: if the next frame still needs more bytes than
-        // recv_pos has, skip the parse pass entirely.
-        let (ptr, total) = {
+        let received = {
             let mut st = self.state.borrow_mut();
-            st.recv_pos += nbytes;
+            // SAFETY: the loop wrote exactly `nbytes` into the spare capacity
+            // handed out by `get_buffer_impl`, so those bytes are initialized.
+            unsafe {
+                let filled = st.recv_buf.len() + nbytes;
+                st.recv_buf.set_len(filled);
+            }
+            // Defer-parse gate: if the next frame still needs more bytes than
+            // have arrived, skip the parse pass entirely.
             if let Some(needed) = st.next_frame_needed {
-                if st.recv_pos < needed {
+                if st.recv_buf.len() < needed {
                     return Ok(());
                 }
                 st.next_frame_needed = None;
             }
-            (st.recv_buf.as_ptr(), st.recv_pos)
+            // Take the received region as an immutable owner. This is O(1) and
+            // shares the allocation, so payloads can be sliced out of it rather
+            // than copied. It also means the parser no longer reads through a
+            // raw pointer into State while State is being mutated.
+            let filled = st.recv_buf.len();
+            st.recv_buf.split_to(filled).freeze()
         };
-        // SAFETY: `recv_buf` is not realloc'd during parsing — only
-        // `protocol.buf` / `state.backlog` / `state.pending_callback_msgs` get
-        // mutated. Pointer stays valid for the slice's lifetime.
-        let data = unsafe { std::slice::from_raw_parts(ptr, total) };
-        let (consumed, needed) = self.parse_recv_data(py, data)?;
+        let (consumed, needed) = self.parse_recv_data(py, &received)?;
         {
             let mut st = self.state.borrow_mut();
-            let recv_pos = st.recv_pos;
-            if consumed > 0 && recv_pos > consumed {
-                st.recv_buf.copy_within(consumed..recv_pos, 0);
+            // Carry the unparsed tail (a partial frame) into the next read. Only
+            // the remainder moves, which is what copy_within did before.
+            if consumed < received.len() {
+                st.recv_buf.extend_from_slice(&received[consumed..]);
             }
-            st.recv_pos = recv_pos.saturating_sub(consumed);
             st.next_frame_needed = needed;
         }
         self.flush_pending_callbacks(py)

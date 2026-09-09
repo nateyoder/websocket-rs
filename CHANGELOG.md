@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 0.7.11
 
+### Performance
+
+- **The BufferedProtocol receive path no longer copies every message payload.**
+  `parse_recv_data` -- the path uvloop uses for every `ws://` connection -- ran
+  with `PayloadMode::Copy`, so each message cost a full `Bytes::copy_from_slice`
+  of its payload. A sampling profile of a receive-only feed put memmove at 20%
+  of main-thread time. `recv_buf` is now a `BytesMut`; each read's received
+  region is taken with `split_to().freeze()` (O(1), allocation shared) and
+  payloads at or above `zero_copy_min_bytes` are handed out as `Bytes::slice`
+  of it -- a refcount bump. Measured on a receive-only push feed, 11 alternating
+  paired rounds against the previous build: **+17.7%** messages/s at 5 KiB
+  [+4.71, +36.55], **+19.1%** at 8 KiB [+11.50, +63.93], **+30.6%** at 64 KiB
+  [+16.34, +38.02]. Small payloads are unchanged by design (see the threshold
+  below) and measured slightly negative but unresolved: -3.0% [-4.72, +3.33] at
+  300 B on a quiet host, tracked as FOLLOWUPS F15.
+- New `connect(zero_copy_min_bytes=...)` sets that threshold, defaulting to
+  4096. A slice keeps its whole backing chunk alive, so a small message retained
+  by the consumer pins a whole read's worth of buffer; copying below the
+  threshold bounds that. Lower it (to 0 to slice everything) when payloads are
+  consumed and dropped promptly -- measured **+18.7%** at 800 B and **+4.6%** at
+  300 B with the threshold at 64 -- and raise it when messages are retained.
+  It is a memory/CPU dial only: the bytes delivered are identical either way.
+- The parse pass no longer reads through a raw pointer into `State` while
+  `State` is being mutated. Taking the received region as an owned `Bytes` up
+  front removes that aliasing invariant along with the copies.
+
+
 ### Fixed
 
 - **A canceled `recv()` no longer swallows the next message.** `deliver_message`

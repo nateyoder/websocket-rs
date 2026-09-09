@@ -93,3 +93,16 @@ DONE (with the closing PR) once merged.
   server-side ping bookkeeping. Next step = capture a failing run with a packet
   trace rather than reasoning from the client side, since the client side is now
   substantially excluded.
+
+- [ ] F15: Zero-copy receive measured slightly negative for payloads below the
+  copy threshold: -3.0% [-4.72, +3.33] at 300 B on a quiet host, -3.75% on a
+  loaded one, 3/11 wins both times. Small but consistent in sign across two
+  runs, and neither interval resolves it. Hypothesis: below the threshold a read
+  pays the per-read `split_to().freeze()` (which promotes `BytesMut` to its
+  shared representation) and gets nothing back, because every payload is copied
+  anyway. Candidate fix = skip the freeze entirely when a read is smaller than
+  `zero_copy_min`, since it cannot then contain a payload at or above it, and
+  parse it in place with `PayloadMode::Copy` as before. Worth resolving because
+  a high-rate small-frame feed (order-book deltas, tick streams) sits entirely
+  in this regime. Measure on a quiet host; the second run above was contaminated
+  by a concurrent build.

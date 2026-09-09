@@ -22,7 +22,9 @@ mod protocol;
 #[cfg(feature = "rustls-transport")]
 mod rustls_transport;
 
-use self::client::{NativeClient, NativeClientBuffered, State, WSMessage, RECV_SWEEP_MIN};
+use self::client::{
+    NativeClient, NativeClientBuffered, State, WSMessage, RECV_SWEEP_MIN, ZERO_COPY_MIN_PAYLOAD,
+};
 use self::protocol::{build_handshake, DeflateCtx};
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -50,11 +52,17 @@ use crate::DEFAULT_CONNECT_TIMEOUT;
 /// - ``"asyncio"``: pin the stdlib ``loop.create_connection`` + SSLProtocol path.
 /// - ``"aiofastnet"``: require aiofastnet; error if it is not installed, and
 ///   always error on Windows for the reason above.
+/// ``zero_copy_min_bytes`` sets the payload size at or above which received
+/// payloads are sliced from the receive buffer instead of copied. A slice keeps
+/// its whole backing chunk alive, so lowering it trades memory for CPU: good
+/// when payloads are consumed and dropped promptly, bad when they are retained.
+/// Defaults to 4096.
+///
 /// - ``"rustls"``: experimental, requires the ``rustls-transport`` cargo feature.
 ///   Keeps TLS on this thread in Rust and takes ``rustls_ca_file`` in place of
 ///   ``ssl_context``; client-certificate auth is not implemented.
 #[pyfunction]
-#[pyo3(signature = (uri, *, headers=None, subprotocols=None, ssl_context=None, connect_timeout=None, receive_timeout=None, proxy=None, compression=false, on_message=None, tls_backend="auto", rustls_ca_file=None))]
+#[pyo3(signature = (uri, *, headers=None, subprotocols=None, ssl_context=None, connect_timeout=None, receive_timeout=None, proxy=None, compression=false, on_message=None, tls_backend="auto", rustls_ca_file=None, zero_copy_min_bytes=None))]
 #[allow(clippy::too_many_arguments)]
 fn connect<'py>(
     py: Python<'py>,
@@ -69,7 +77,9 @@ fn connect<'py>(
     on_message: Option<Py<PyAny>>,
     tls_backend: &str,
     rustls_ca_file: Option<String>,
+    zero_copy_min_bytes: Option<usize>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let zero_copy_min = zero_copy_min_bytes.unwrap_or(ZERO_COPY_MIN_PAYLOAD);
     let (scheme, host, port, path) = parse_ws_uri(&uri)?;
     let is_tls = scheme == "wss";
     let use_rustls = resolve_tls_backend(tls_backend, is_tls, ssl_context.is_some())?;
@@ -107,8 +117,8 @@ fn connect<'py>(
             buf_known_empty: false,
             mask_pool: Vec::new(),
             send_buf: Vec::new(),
-            recv_buf: Vec::new(),
-            recv_pos: 0,
+            recv_buf: BytesMut::new(),
+            zero_copy_min,
             next_frame_needed: None,
             write_queue: VecDeque::new(),
             loop_ref: None,

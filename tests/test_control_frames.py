@@ -85,7 +85,7 @@ class StubTransport:
         self.closed = True
 
 
-async def connect_over_stub():
+async def connect_over_stub(**connect_kwargs):
     """Connect the native client to a StubTransport instead of a real socket."""
     loop = asyncio.get_running_loop()
     original = loop.create_connection
@@ -98,7 +98,7 @@ async def connect_over_stub():
 
     loop.create_connection = create_connection
     try:
-        ws = await connect("ws://stub:1")
+        ws = await connect("ws://stub:1", **connect_kwargs)
     finally:
         loop.create_connection = original
     stub.writes.clear()  # drop the handshake request
