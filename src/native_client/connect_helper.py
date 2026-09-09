@@ -65,7 +65,7 @@ def _socks5_connect_blocking(proxy_host, proxy_port, user, password, target_host
 
 def _parse_proxy_uri(proxy):
     # socks5://[user:password@]host:port
-    from urllib.parse import urlsplit, unquote
+    from urllib.parse import unquote, urlsplit
     parts = urlsplit(proxy)
     if parts.scheme not in ("socks5", "socks5h"):
         raise ValueError(f"Only socks5:// proxies are supported (got {parts.scheme})")
@@ -103,9 +103,29 @@ async def _connect_helper(loop, protocol_factory, host, port, is_tls, ssl_ctx,
                     s.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_NODELAY, 1)
             except Exception:
                 pass
-        transport.write(bytes(req_bytes))
-        await handshake_fut
-        return client
-    if connect_timeout is not None:
-        return await _asyncio.wait_for(_do(), timeout=connect_timeout)
-    return await _do()
+        try:
+            transport.write(bytes(req_bytes))
+            await handshake_fut
+            return client
+        finally:
+            # Exception tracebacks may outlive the event-loop thread. Never
+            # leave a native protocol or transport in these retained locals.
+            transport = None
+            _proto = None
+    try:
+        if connect_timeout is not None:
+            return await _asyncio.wait_for(_do(), timeout=connect_timeout)
+        return await _do()
+    except BaseException:
+        # TCP/TLS setup may fail before the upgrade Future has a consumer.
+        handshake_fut.cancel()
+        client.close()
+        raise
+    finally:
+        # _do closes over these cells. Clearing them also detaches native
+        # references from retained coroutine/timeout/cancellation tracebacks.
+        client = None
+        protocol_factory = None
+        handshake_fut = None
+        loop = None
+        _do = None
