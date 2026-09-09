@@ -78,7 +78,7 @@ Sync wins TLS 256 B–100 KB by 30–60%. At 1 MB picows leads by ~7%; ws-rs tie
 
 📊 **[Full benchmarks — all 3 servers, TCP & TLS, latency distributions, compression](docs/BENCHMARKS.md)** | 📝 **[Optimization Research](docs/OPTIMIZATION_RESEARCH.md)**
 
-> **TLS throughput:** `wss://` automatically routes through [aiofastnet](https://pypi.org/project/aiofastnet/) when it is installed — **+13.1%** request throughput at 256 B [+10.86, +15.93] and **+11.7%** at 8 KiB [+10.90, +13.00] over asyncio's `SSLProtocol` (15 paired rounds, 15/15 wins). Install it with `pip install 'websocket-rs[fast-tls]'`; without it — and always on Windows, where aiofastnet's `loop.add_reader` I/O is unsupported — the stdlib path is used unchanged. See **[TLS backends](docs/TLS-BACKENDS.md)**.
+> **TLS throughput:** `wss://` automatically routes through [aiofastnet](https://pypi.org/project/aiofastnet/) when it is installed — **+13.1%** request throughput at 256 B [+10.86, +15.93] and **+11.7%** at 8 KiB [+10.90, +13.00] over asyncio's `SSLProtocol` (15 paired rounds, 15/15 wins). Install it with `pip install 'websocket-rs-nateyoder[fast-tls]'`; without it — and always on Windows, where aiofastnet's `loop.add_reader` I/O is unsupported — the stdlib path is used unchanged. See **[TLS backends](docs/TLS-BACKENDS.md)**.
 
 ## ✨ What's New in v0.7.3
 
@@ -94,13 +94,13 @@ Full details in [CHANGELOG.md](CHANGELOG.md).
 
 ```bash
 # From PyPI (recommended)
-pip install websocket-rs
+pip install websocket-rs-nateyoder
 
 # Using uv
-uv pip install websocket-rs
+uv pip install websocket-rs-nateyoder
 
 # From source
-pip install git+https://github.com/coseto6125/websocket-rs.git
+pip install git+https://github.com/nateyoder/websocket-rs.git
 ```
 
 ### Basic Usage
@@ -173,7 +173,7 @@ which waits indefinitely for each receive operation.
 
 ```bash
 # Specify version (example for Linux x86_64, Python 3.12+)
-uv pip install https://github.com/coseto6125/websocket-rs/releases/download/v0.6.0/websocket_rs-0.6.0-cp312-abi3-manylinux_2_34_x86_64.whl
+uv pip install https://github.com/nateyoder/websocket-rs/releases/download/v0.7.10.post1/websocket_rs_nateyoder-0.7.10.post1-cp312-abi3-manylinux_2_34_x86_64.whl
 ```
 
 ### From Source

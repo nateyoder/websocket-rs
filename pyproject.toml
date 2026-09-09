@@ -4,7 +4,13 @@ build-backend = "maturin"
 
 [project]
 name = "websocket-rs-nateyoder"
-version = "0.7.11"
+# Fork versioning: "<upstream base>.postN". The upstream base is the
+# websocket-rs release this fork is rebased on; N is the fork's own patch level
+# and increments on every release from this repository. PEP 440 has no way to
+# spell a fork marker that PyPI will accept (local versions like "+ncy1" are
+# rejected on upload), so the fork identity lives in the distribution name and
+# ".postN" keeps this line from ever colliding with an upstream version.
+version = "0.7.10.post1"
 description = "Fork of websocket-rs: high-performance WebSocket client for Python using Rust"
 readme = "README.pypi.md"
 authors = [

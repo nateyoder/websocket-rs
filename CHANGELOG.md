@@ -3,9 +3,25 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and versions follow the fork scheme described below.
 
-## [Unreleased] — 0.7.11
+## Versioning
+
+This fork releases as `<upstream base>.postN` — the upstream `websocket-rs`
+release it is rebased on, plus its own patch level. `0.7.10.post1` is the first
+release from this repository on top of upstream 0.7.10. The scheme exists
+because PEP 440 offers no fork marker that PyPI will accept (local versions such
+as `+ncy1` are rejected on upload), and `.postN` cannot collide with a version
+upstream might publish. The distribution name `websocket-rs-nateyoder` is what
+identifies the fork; the import name stays `websocket_rs`.
+
+`websocket_rs.__version__` reports this version. The Rust crate's own version
+tracks only the upstream base, since Cargo requires semver and semver cannot
+express `.postN`.
+
+## [0.7.10.post1] - 2026-09-09
+
+First release of this fork. Everything below is on top of upstream 0.7.10.
 
 ### Changed
 
@@ -146,7 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backend available in the build. These also pin the invariant that the
   raw-socket send fast path stays disabled on TLS connections — a leak there
   would put plaintext on the wire and every round-trip assertion would fail.
-- Full performance audit of 0.7.11 under `docs/performance-audit/`, covering
+- Full performance audit of this release under `docs/performance-audit/`, covering
   canceled-receiver retention, queue backpressure, zero-copy retention
   amplification, compression policy and buffer reclamation. Those findings are
   not addressed by this change.

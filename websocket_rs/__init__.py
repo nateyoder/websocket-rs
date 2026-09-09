@@ -42,10 +42,24 @@ connect = native_client.connect
 # Canonical message type (zero-copy buffer-protocol view).
 WSMessage = native_client.WSMessage
 
-# Derived from Cargo.toml via CARGO_PKG_VERSION (src/lib.rs), so it cannot fall
-# behind the way a hand-written literal did — this read "0.7.1" through both
-# the 0.7.2 and 0.7.3 releases.
-__version__ = _websocket_rs.__version__
+# The shipped version, read from the installed distribution metadata rather than
+# hard-coded: a literal fell behind before (this read "0.7.1" through both the
+# 0.7.2 and 0.7.3 releases). Metadata is the right source because this fork's
+# version ("<upstream base>.postN") is not expressible in Cargo's semver, so the
+# extension's CARGO_PKG_VERSION reports only the upstream base it rebases on.
+# That base is the fallback for an uninstalled tree (running from a source
+# checkout), where no distribution metadata exists.
+try:
+    from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
+    from importlib.metadata import version as _dist_version
+
+    try:
+        __version__ = _dist_version("websocket-rs-nateyoder")
+    except _PackageNotFoundError:
+        __version__ = _websocket_rs.__version__
+    del _dist_version, _PackageNotFoundError
+except ImportError:  # pragma: no cover - importlib.metadata is stdlib on 3.12+
+    __version__ = _websocket_rs.__version__
 
 __all__ = [
     "connect",
