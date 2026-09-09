@@ -22,7 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [+16.34, +38.02]. Small payloads are unchanged by design (see the threshold
   below) and measured a small but likely-real regression: -3.0% [-4.72, +3.33]
   at 300 B on a quiet host, with the same sign and 3/11 paired wins on a second
-  independent run (combined sign test p≈0.013). Tracked as FOLLOWUPS F15.
+  independent run (combined sign test p≈0.013). That regression belongs to the
+  *copy* path, not to slicing: with the threshold at 0 the same 300 B feed gains
+  +4.71% (see below). It is the per-read `split_to().freeze()` being paid by
+  reads that then copy every payload anyway. Tracked as FOLLOWUPS F15.
 - New `connect(zero_copy_min_bytes=...)` sets that threshold, defaulting to
   4096. A slice keeps its whole backing chunk alive -- tens of KiB per read --
   so any retained payload costs far more than its own length. The threshold
@@ -31,8 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Measured with one 5000 B message per read and 20,000 messages all retained:
   374.9 MB max RSS at the default against 100 MB of live payload, versus
   145.6 MB with everything copied (`zero_copy_min_bytes=1<<30`). Lower it (to 0
-  to slice everything) when payloads are consumed and dropped promptly --
-  measured **+18.7%** at 800 B and **+4.6%** at 300 B with the threshold at 64.
+  to slice everything) when payloads are consumed and dropped promptly: slicing
+  is faster at every size measured, not just large ones. With
+  `zero_copy_min_bytes=0` against the previous build, receive-only push feed,
+  11 alternating paired rounds -- **+4.71%** at 300 B [+0.34, +8.29] 9/11,
+  **+17.30%** at 800 B [+7.49, +24.18] 10/11, **+21.29%** at 5 KiB
+  [+14.08, +38.74] 11/11.
   Raise it *past your typical message size*, or convert payloads to `bytes` on
   receipt, if you queue raw payloads deeply; leaving the default will not bound
   retention for messages that take the slicing path. It is a memory/CPU dial
@@ -160,6 +167,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- The `tls_backend="rustls"` receive path no longer runs a full-size memset per
+  message. `read_to_end` zeroed its destination's spare capacity on every
+  `data_received`; the plaintext buffer is now sized from
+  `IoState::plaintext_bytes_to_read()`, read into directly, and kept at its
+  high-water length with a separate used-count bounding the live bytes, so
+  after warmup there is no zeroing at all. Profiled memset 294 → 96 samples
+  under 8 KiB request/response load. End-to-end against the `"auto"` default,
+  15 alternating paired rounds: 256 B +5.80% → +6.02%, 8 KiB -3.30% → -2.71%.
+  The backend remains off by default behind the `rustls-transport` cargo
+  feature.
 - Lazy acknowledgment state, indexed cancellation cleanup and direct frame
   encoding avoid full-registry scans and unnecessary copies. Benchmarks and
   measured CPU, latency and memory tradeoffs are in `docs/PING_ACK_PERFORMANCE.md`.

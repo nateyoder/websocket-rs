@@ -1332,18 +1332,6 @@ impl NativeClient {
 
 // Helpers (non-pymethod)
 impl NativeClient {
-    /// Parse `data` (a window into `recv_buf`) in place. Returns the number
-    /// of bytes consumed; the caller compacts the rest. The fast path
-    /// (handshake done, no fragment in flight, no deflate state, no carry-
-    /// over `buf`) parses straight from `data` without copying. The
-    /// slow path (handshake-in-progress / fragmented / compressed) routes
-    /// through `data_received_inner` which uses `buf` as its working
-    /// area — in that case we report the full window as consumed.
-    /// Returns `(consumed, next_frame_needed)`. `next_frame_needed` is
-    /// `Some(N)` when parse stopped on a partial frame: `recv_pos` (after
-    /// caller's compaction) must reach `N` before the next parse pass can
-    /// complete that frame. Caller writes it onto State once, outside any
-    /// per-frame borrow churn.
     /// True when frames arriving now are frame-aligned: handshake done,
     /// nothing parked in `buf`, no fragment assembly in flight. Only then
     /// may a caller scan incoming bytes directly instead of parking them.
@@ -1477,13 +1465,15 @@ impl NativeClient {
         Ok(())
     }
 
-    /// Parse `data` (a window into `recv_buf`) in place; the caller compacts
-    /// the remainder. Frame-aligned windows take the shared fast-path scan;
+    /// Parse `owner`, the immutable region `buffer_updated_impl` split off the
+    /// front of `recv_buf`. The caller carries any unparsed remainder back into
+    /// `recv_buf` for the next read. Frame-aligned windows take the shared
+    /// fast-path scan, which can slice payloads straight out of `owner`;
     /// anything else routes through `data_received_inner`, which reports the
     /// full window as consumed because it parked the bytes itself.
-    /// Returns `(consumed, next_frame_needed)`; `Some(N)` means the caller's
-    /// `recv_pos` must reach `N` before the next parse pass can finish the
-    /// partial frame.
+    /// Returns `(consumed, next_frame_needed)`; `Some(N)` means `recv_buf` must
+    /// hold at least `N` bytes -- the carried-over tail plus newly received
+    /// bytes -- before the next parse pass can finish the partial frame.
     fn parse_recv_data(&self, py: Python<'_>, owner: &Bytes) -> PyResult<(usize, Option<usize>)> {
         let data: &[u8] = owner;
         if !self.fast_path_eligible() {
@@ -1582,7 +1572,8 @@ impl NativeClient {
 
     /// asyncio BufferedProtocol implementation. Lives on NativeClient so the
     /// `NativeClientBuffered` subclass can forward to it. Returns a writable
-    /// `recv_buf[recv_pos..capacity]` slice via `PyMemoryView_FromMemory`;
+    /// slice over `recv_buf`'s spare capacity (from `len()` to `capacity()`,
+    /// i.e. past any carried-over partial frame) via `PyMemoryView_FromMemory`;
     /// uvloop fills it with kernel data, then calls `buffer_updated_impl`.
     fn get_buffer_impl<'py>(
         &self,

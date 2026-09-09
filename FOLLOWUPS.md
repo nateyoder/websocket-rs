@@ -10,16 +10,32 @@ DONE (with the closing PR) once merged.
   token validation before splicing.
   Source: PR #45 correctness review (confidence 15, not a regression).
 
-- [ ] F9: The rustls transport wins at 256 B (+5.80% [+5.47, +7.61], 14/15
-  rounds) and loses at 8 KiB (−3.30% [−3.99, −2.90], 1/15) against
+- [ ] F9: The rustls transport wins at 256 B (+6.02% [+5.77, +7.68], 14/15
+  rounds) and loses at 8 KiB (−2.71% [−2.92, −2.05]) against
   `tls_backend="auto"`, which is what keeps it behind the `rustls-transport`
-  feature. Lower per-message overhead, higher per-byte cost. The
-  path still copies through rustls's buffered reader, a reusable plaintext `Vec`
-  and owned message payloads, and materializes outbound ciphertext for the
-  asyncio transport. Next experiments = rustls's unbuffered interface and
-  eliminating those copies. Nothing yet establishes that copies *caused* the
-  regression; a buffer-lifetime redesign needs its own tests. This is the
-  blocker for doing TLS and framing in one Rust package.
+  feature. Lower per-message overhead, higher per-byte cost. Figures are
+  post-PR #7, which removed the per-message memset in the plaintext read
+  (previously +5.80% / −3.30%); a re-measurement at 9 rounds reproduced the
+  signs with intervals too wide to confirm the point estimates, and the host is
+  intermittently noisy, so treat either run as directional.
+  **Attribution.** The remaining 8 KiB gap profiles as memmove: 535 samples
+  against aiofastnet's 294, i.e. the two staging copies the *buffered* rustls
+  API makes (`read_tls` into rustls's own buffer, then a copy back out).
+  Plaintext still copies again into owned message payloads, and outbound
+  ciphertext is still materialized for the asyncio transport.
+  **Measured negative, do not re-run without a new hypothesis:** swapping the
+  crypto provider ring → aws-lc-rs measured +6.35% / −3.51%, indistinguishable
+  from ring, with comparable AES kernels in the profile. The provider is not
+  the gap.
+  **Unbuffered rustls is not yet worth it.** Stable rustls 0.23.40 does *not*
+  decrypt in place: `ReadTraffic` holds `_incoming_tls` unused "for forwards
+  compatibility" and `next_record()` pops an owned `Vec` off
+  `received_plaintext`, with a source comment marking in-place decryption as
+  future work. So the unbuffered rewrite would remove only the ciphertext
+  staging copy — roughly 1 percentage point — and none of the plaintext
+  copies, at a cost of ~400 lines of state machine. Revisit when rustls ships
+  in-place decryption. This is the blocker for doing TLS and framing in one
+  Rust package.
 
 - [x] F10: **Measured, not a win. Do not re-run without a new hypothesis.**
   Routing `wss://` through `NativeClientBuffered` on the aiofastnet transport
@@ -98,24 +114,37 @@ DONE (with the closing PR) once merged.
   per-read freeze.** The suspicion was that a read below `zero_copy_min` pays
   `split_to().freeze()` and gets nothing back, because every payload on such a
   pass is copied anyway. That fix was implemented -- skip the freeze when
-  `recv_buf.len() < zero_copy_min`, parsing in place via `mem::take` and
-  compacting as before -- and measured **neutral** against the current head at
-  the default threshold, 15 alternating paired rounds on an idle host: 300 B
-  -0.90% [-2.04, +1.19] 6/15; 800 B +1.40% [-1.45, +3.03] 9/15; 2 KiB -1.37%
-  [-10.13, +0.59] 6/15. Win counts at coin-flip. The code was reverted rather
-  than shipped: it adds a second parse path for no measured gain.
+  `recv_buf.len() < zero_copy_min` (gated on the buffer length rather than this
+  read's `nbytes`, so a small read completing a large carried-over partial frame
+  keeps the fast path), parsing in place via `mem::take` and compacting as
+  before -- and measured **neutral** against head at the default threshold, 15
+  alternating paired rounds on an idle host: 300 B -0.90% [-2.04, +1.19] 6/15;
+  800 B +1.40% [-1.45, +3.03] 9/15; 2 KiB -1.37% [-10.13, +0.59] 6/15. Win
+  counts at coin-flip. The code was reverted rather than shipped: it adds a
+  second parse path for no measured gain.
 
   Note the two runs that produced the original -3% signal were both taken on a
   contended host, and a profile diff at 300 B showed no freeze-shaped cost (the
-  candidate did *less* zeroing, `__bzero` -111). Treat the regression itself as
+  candidate did *less* zeroing, `__bzero` -111). The sign test across those two
+  runs (3/11 twice, combined p~0.013) was computed over contaminated inputs:
+  the statistic was sound, the data was not. Treat the regression itself as
   unconfirmed, not merely unexplained.
 
-  What is confirmed, on an idle host, is that the threshold is worth much more
-  than the regression it guards against. Same binary, `zero_copy_min_bytes=0`
-  against the 4096 default, 15 paired rounds: 300 B **+9.58%** [+7.01, +13.15]
-  14/15; 800 B **+15.43%** [+11.01, +21.76] 14/15; 2 KiB **+11.90%**
-  [+6.56, +18.88] 12/15. A consumer that copies or drops payloads promptly
-  should set `zero_copy_min_bytes=0` and stop thinking about this entry.
+  What is confirmed, across two independent runs, is that the threshold is worth
+  far more than whatever it guards against. Slicing wins at every size measured:
 
-  Anyone reopening it should first reproduce the regression on an idle host with
-  15+ rounds before hunting a cause; the freeze is ruled out.
+  - loaded host, 11 paired rounds, `zero_copy_min_bytes=0` vs the pre-change
+    baseline: 300 B +4.71% [+0.34, +8.29] 9/11; 800 B +17.30% [+7.49, +24.18]
+    10/11; 5 KiB +21.29% [+14.08, +38.74] 11/11.
+  - idle host, 15 paired rounds, same binary at 0 vs the 4096 default: 300 B
+    +9.58% [+7.01, +13.15] 14/15; 800 B +15.43% [+11.01, +21.76] 14/15;
+    2 KiB +11.90% [+6.56, +18.88] 12/15.
+
+  A consumer that copies or drops payloads promptly should set
+  `zero_copy_min_bytes=0` and stop thinking about this entry. Anyone reopening
+  it should first reproduce the regression on an idle host with 15+ rounds
+  before hunting a cause; the freeze is ruled out.
+
+  Note this affects `ws://` only. `wss://` returns a bare `NativeClient` whose
+  `data_received` path already slices from the incoming `PyBytes`, so neither
+  the threshold nor this entry applies to TLS connections.

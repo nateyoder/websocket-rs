@@ -143,11 +143,15 @@ impl RustlsTransport {
         if self.state.borrow().closing {
             return Ok(());
         }
-        let decoded: PyResult<(Vec<u8>, bool)> = (|| {
+        let decoded: PyResult<(Vec<u8>, usize, bool)> = (|| {
             let mut st = self.state.borrow_mut();
             let mut input = data;
+            // Kept at its high-water length, never cleared: `read_to_end` treats
+            // spare capacity as uninitialised and zeroes it on every call, which
+            // profiling showed as a full-size memset per message. Reading into
+            // an already-initialised slice with a separate used-length skips it.
             let mut plain = std::mem::take(&mut st.plaintext);
-            plain.clear();
+            let mut used = 0usize;
             let mut peer_closed = false;
             while !input.is_empty() {
                 let n = st.tls.read_tls(&mut input).map_err(io_error)?;
@@ -169,15 +173,28 @@ impl RustlsTransport {
                     }
                 })?;
                 peer_closed |= io.peer_has_closed();
-                match st.tls.reader().read_to_end(&mut plain) {
-                    Ok(_) => (),
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
-                    Err(e) => return Err(io_error(e)),
+                // rustls reports exactly how much plaintext is ready, so the
+                // destination can be sized once and filled with a plain read
+                // rather than grown-and-zeroed by read_to_end.
+                let want = io.plaintext_bytes_to_read();
+                if want > 0 {
+                    if plain.len() < used + want {
+                        plain.resize(used + want, 0);
+                    }
+                    // `read` rather than `read_exact`: a short read advances
+                    // `used` by exactly what was copied, and the remainder is
+                    // re-reported by the next `plaintext_bytes_to_read()`, so
+                    // no already-consumed plaintext can be dropped.
+                    match st.tls.reader().read(&mut plain[used..used + want]) {
+                        Ok(n) => used += n,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
+                        Err(e) => return Err(io_error(e)),
+                    }
                 }
             }
-            Ok((plain, peer_closed))
+            Ok((plain, used, peer_closed))
         })();
-        let (mut plain, peer_closed) = match decoded {
+        let (plain, used, peer_closed) = match decoded {
             Ok(v) => v,
             Err(e) => return self.fail(py, e),
         };
@@ -188,9 +205,9 @@ impl RustlsTransport {
             // One shared policy with NativeClient::data_received rather than a
             // second copy here: queued callbacks are flushed whether or not the
             // parse succeeded, and the parse result is returned afterwards.
-            c.data_received_plaintext(py, &plain)?;
+            c.data_received_plaintext(py, &plain[..used])?;
         }
-        plain.clear();
+        // Hand the buffer back at full length; `used` bounds the live bytes.
         self.state.borrow_mut().plaintext = plain;
         if peer_closed {
             self.close(py)?;
