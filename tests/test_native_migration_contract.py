@@ -4,11 +4,40 @@ import asyncio
 import base64
 import gc
 import hashlib
+import socket
 import weakref
 
 import pytest
 
 from websocket_rs.native_client import connect as async_connect
+
+
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+@pytest.mark.parametrize("connect_timeout", [None, 1])
+def test_pre_upgrade_connection_refusal_has_no_unhandled_future(loop_kind, connect_timeout):
+    loop_factory = asyncio.new_event_loop
+    if loop_kind == "uvloop":
+        loop_factory = pytest.importorskip("uvloop").new_event_loop
+
+    async def run():
+        reports = []
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(lambda _loop, context: reports.append(context))
+        try:
+            with socket.socket() as reserved:
+                reserved.bind(("127.0.0.1", 0))
+                port = reserved.getsockname()[1]
+            with pytest.raises(ConnectionRefusedError):
+                await async_connect(f"ws://127.0.0.1:{port}", connect_timeout=connect_timeout)
+            await asyncio.sleep(0)
+            gc.collect()
+            await asyncio.sleep(0)
+            assert reports == []
+        finally:
+            loop.set_exception_handler(None)
+
+    with asyncio.Runner(loop_factory=loop_factory) as runner:
+        runner.run(run())
 
 
 @pytest.mark.parametrize("fault", ["status", "upgrade", "connection", "accept", "duplicate"])

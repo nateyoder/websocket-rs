@@ -117,6 +117,8 @@ async def _connect_helper(loop, protocol_factory, host, port, is_tls, ssl_ctx,
             return await _asyncio.wait_for(_do(), timeout=connect_timeout)
         return await _do()
     except BaseException:
+        # TCP/TLS setup may fail before the upgrade Future has a consumer.
+        handshake_fut.cancel()
         client.close()
         raise
     finally:
