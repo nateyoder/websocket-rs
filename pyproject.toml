@@ -3,9 +3,9 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "websocket-rs"
+name = "websocket-rs-nateyoder"
 version = "0.7.11"
-description = "High-performance WebSocket client library for Python using Rust"
+description = "Fork of websocket-rs: high-performance WebSocket client for Python using Rust"
 readme = "README.pypi.md"
 authors = [
     {name = "coseto6125", email = "enorenor@gmail.com"}
@@ -30,12 +30,12 @@ keywords = ["websocket", "rust", "async", "high-performance", "client"]
 dependencies = []
 
 [project.urls]
-"Homepage" = "https://github.com/coseto6125/websocket-rs"
-"Documentation" = "https://github.com/coseto6125/websocket-rs/blob/main/API.md"
-"API Reference" = "https://github.com/coseto6125/websocket-rs/blob/main/API.md"
-"Source Code" = "https://github.com/coseto6125/websocket-rs"
-"Bug Tracker" = "https://github.com/coseto6125/websocket-rs/issues"
-"Changelog" = "https://github.com/coseto6125/websocket-rs/releases"
+"Homepage" = "https://github.com/nateyoder/websocket-rs"
+"Documentation" = "https://github.com/nateyoder/websocket-rs/blob/main/docs/API.md"
+"API Reference" = "https://github.com/nateyoder/websocket-rs/blob/main/docs/API.md"
+"Source Code" = "https://github.com/nateyoder/websocket-rs"
+"Bug Tracker" = "https://github.com/nateyoder/websocket-rs/issues"
+"Changelog" = "https://github.com/nateyoder/websocket-rs/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Optional TLS acceleration. websocket_rs.connect() routes wss:// through
@@ -68,6 +68,9 @@ benchmark = [
 
 [tool.maturin]
 python-source = "."
+# The distribution is renamed for the fork; the import name must not change,
+# so downstream code keeps `import websocket_rs` untouched.
+module-name = "websocket_rs"
 features = ["pyo3/extension-module"]
 
 [tool.ruff]
