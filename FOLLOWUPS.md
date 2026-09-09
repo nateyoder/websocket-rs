@@ -94,21 +94,28 @@ DONE (with the closing PR) once merged.
   trace rather than reasoning from the client side, since the client side is now
   substantially excluded.
 
-- [ ] F15: Zero-copy receive is a likely-real small regression for payloads
-  below the copy threshold: -3.0% [-4.72, +3.33] at 300 B on a quiet host,
-  -3.75% on a loaded one, 3/11 paired wins both times. The confidence intervals
-  span zero, but the sign test is the stronger statistic here: 3/11 is p≈0.11
-  on its own under a fair-coin null, and the same sign with the same 3/11 on an
-  independent run puts the combined evidence near p≈0.013. Treat it as real and
-  small, not unresolved. Hypothesis: below the threshold a read pays the
-  per-read `split_to().freeze()` (which promotes `BytesMut` to its shared
-  representation) and gets nothing back, because every payload is copied anyway.
-  Candidate fix = skip the freeze and parse in place with `PayloadMode::Copy` as
-  before when `recv_buf.len() < zero_copy_min`, since the buffer cannot then
-  contain a payload at or above the threshold. Gate on the buffer length rather
-  than on this read's `nbytes`: a small read can complete a large partial frame
-  carried over from earlier reads, and copying that payload would be correct but
-  would lose the fast path on every fragmented large frame. Worth resolving
-  because a high-rate small-frame feed (order-book deltas, tick streams) sits
-  entirely in this regime. Measure on a quiet host; the second run above was
-  contaminated by a concurrent build.
+- [ ] F15: **Hypothesis falsified. The regression, if it exists, is not the
+  per-read freeze.** The suspicion was that a read below `zero_copy_min` pays
+  `split_to().freeze()` and gets nothing back, because every payload on such a
+  pass is copied anyway. That fix was implemented -- skip the freeze when
+  `recv_buf.len() < zero_copy_min`, parsing in place via `mem::take` and
+  compacting as before -- and measured **neutral** against the current head at
+  the default threshold, 15 alternating paired rounds on an idle host: 300 B
+  -0.90% [-2.04, +1.19] 6/15; 800 B +1.40% [-1.45, +3.03] 9/15; 2 KiB -1.37%
+  [-10.13, +0.59] 6/15. Win counts at coin-flip. The code was reverted rather
+  than shipped: it adds a second parse path for no measured gain.
+
+  Note the two runs that produced the original -3% signal were both taken on a
+  contended host, and a profile diff at 300 B showed no freeze-shaped cost (the
+  candidate did *less* zeroing, `__bzero` -111). Treat the regression itself as
+  unconfirmed, not merely unexplained.
+
+  What is confirmed, on an idle host, is that the threshold is worth much more
+  than the regression it guards against. Same binary, `zero_copy_min_bytes=0`
+  against the 4096 default, 15 paired rounds: 300 B **+9.58%** [+7.01, +13.15]
+  14/15; 800 B **+15.43%** [+11.01, +21.76] 14/15; 2 KiB **+11.90%**
+  [+6.56, +18.88] 12/15. A consumer that copies or drops payloads promptly
+  should set `zero_copy_min_bytes=0` and stop thinking about this entry.
+
+  Anyone reopening it should first reproduce the regression on an idle host with
+  15+ rounds before hunting a cause; the freeze is ruled out.
