@@ -181,18 +181,28 @@ async def connect(
 
 
 class NativeClientBuffered(NativeClient):
-    """Subclass of :class:`NativeClient` that enables asyncio's
-    BufferedProtocol path (``get_buffer`` + ``buffer_updated``). uvloop
-    writes kernel data directly into an internal reusable buffer,
-    skipping the per-recv ``bytes`` allocation the plain Protocol path
-    incurs. ~15% win on 64 KB pipelined throughput vs the base class.
+    """Subclass of :class:`NativeClient` exposing the BufferedProtocol hooks
+    (``get_buffer`` + ``buffer_updated``), which let the loop write kernel
+    data straight into an internal reusable buffer and skip the per-recv
+    ``bytes`` allocation the plain Protocol path incurs. ~15% win on 64 KB
+    pipelined throughput vs the base class.
+
+    **That win is uvloop-only.** Whether the hooks are used at all is the
+    loop's decision, and the two rules differ: uvloop duck-types, so it
+    calls them; stdlib asyncio gates on
+    ``isinstance(protocol, asyncio.BufferedProtocol)``
+    (``selector_events.py``), and this is a pyclass rather than a subclass
+    of it, so under plain asyncio the transport silently falls back to
+    ``data_received`` and these hooks are never called. Nothing breaks —
+    the fallback is the ordinary receive path — but the allocation saving
+    does not apply. aiofastnet uses the same ``isinstance`` rule, with an
+    ``is_buffered_protocol()`` escape hatch this class does not implement.
 
     Instances are produced transparently by :func:`connect` when the URI
     scheme is ``ws://`` (plain TCP). For ``wss://``, :func:`connect`
-    returns a bare :class:`NativeClient` — asyncio's SSLProtocol delivers
-    TLS records in ≤16 KB chunks, and the per-callback
-    ``PyMemoryView_FromMemory`` + RefCell churn makes BufferedProtocol
-    net-negative on the TLS path.
+    returns a bare :class:`NativeClient`. Routing TLS through this class
+    instead was measured on the aiofastnet transport and is neutral, so
+    the simpler class stays: see ``FOLLOWUPS.md`` F10.
 
     Do not instantiate directly; always go through :func:`connect`.
     """
