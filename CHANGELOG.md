@@ -167,6 +167,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- The `tls_backend="rustls"` receive path no longer runs a full-size memset per
+  message. `read_to_end` zeroed its destination's spare capacity on every
+  `data_received`; the plaintext buffer is now sized from
+  `IoState::plaintext_bytes_to_read()`, read into directly, and kept at its
+  high-water length with a separate used-count bounding the live bytes, so
+  after warmup there is no zeroing at all. Profiled memset 294 → 96 samples
+  under 8 KiB request/response load. End-to-end against the `"auto"` default,
+  15 alternating paired rounds: 256 B +5.80% → +6.02%, 8 KiB -3.30% → -2.71%.
+  The backend remains off by default behind the `rustls-transport` cargo
+  feature.
 - Lazy acknowledgment state, indexed cancellation cleanup and direct frame
   encoding avoid full-registry scans and unnecessary copies. Benchmarks and
   measured CPU, latency and memory tradeoffs are in `docs/PING_ACK_PERFORMANCE.md`.
