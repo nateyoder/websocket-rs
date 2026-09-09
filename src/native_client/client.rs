@@ -72,12 +72,21 @@ pub(crate) const RECV_SWEEP_MIN: usize = 32;
 /// Default payload size at or above which payloads are handed out as
 /// `Bytes::slice` of the receive buffer instead of being copied.
 ///
-/// A slice keeps its entire backing chunk alive, so a small message retained by
-/// the consumer pins a whole read's worth of buffer (tens of KiB). Copying below
-/// this size costs little and bounds that exposure; above it the copy is the
-/// dominant per-message cost. Callers who drop payloads promptly can lower it
-/// via `connect(zero_copy_min_bytes=...)`; callers who retain them should raise
-/// it.
+/// A slice keeps its entire backing chunk alive, so any retained payload pins a
+/// whole read's worth of buffer (tens of KiB, `HEADROOM` in `get_buffer_impl`).
+/// This threshold only bounds that exposure *below* itself: a payload at or
+/// above it is sliced and pins its chunk with nothing capping the multiplier.
+/// Measured with one 5000 B message per read and 20,000 messages all retained:
+/// 374.9 MB max RSS at this default against 100 MB of live payload, versus
+/// 145.6 MB with everything copied -- and the ratio grows as reads get smaller
+/// relative to the chunk.
+///
+/// So the lever runs both ways. Callers who drop payloads promptly can lower it
+/// via `connect(zero_copy_min_bytes=...)` to skip more copies; callers who
+/// queue raw payloads deeply should raise it *past their typical message size*
+/// (or convert each payload to `bytes` on receipt) rather than leave the
+/// default, because the default does not bound retention for the sizes that
+/// take the slicing path.
 pub(crate) const ZERO_COPY_MIN_PAYLOAD: usize = 4096;
 
 fn shrink_pings(pings: &mut PingRegistry) {
@@ -132,12 +141,10 @@ pub(crate) struct State {
     /// `Vec::with_capacity()` allocation in the hot pipelined loop. Mirrors
     /// picows' `_write_buffer` MemoryBuffer.
     pub(crate) send_buf: Vec<u8>,
-    /// Reusable receive buffer exposed to uvloop via the BufferedProtocol
-    /// `get_buffer` / `buffer_updated` pair. uvloop writes kernel data here
-    /// directly, skipping the per-recv `bytes` object allocation that the
-    /// plain `data_received` path incurs. Sized to one large frame; grows on
-    /// demand if a single recv would overrun. Mirrors picows' `_read_buffer`.
-    /// Receive buffer the loop writes into directly. `recv_buf[..len]` is
+    /// Receive buffer exposed to uvloop via the BufferedProtocol `get_buffer` /
+    /// `buffer_updated` pair, so kernel data lands here directly and skips the
+    /// per-recv `bytes` allocation the plain `data_received` path incurs.
+    /// `recv_buf[..len]` is
     /// received data not yet parsed (a partial frame at the tail); `get_buffer`
     /// exposes the spare capacity past it so kernel writes append, and
     /// `buffer_updated` extends the length, parses, and keeps the remainder.

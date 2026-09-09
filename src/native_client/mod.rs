@@ -52,15 +52,23 @@ use crate::DEFAULT_CONNECT_TIMEOUT;
 /// - ``"asyncio"``: pin the stdlib ``loop.create_connection`` + SSLProtocol path.
 /// - ``"aiofastnet"``: require aiofastnet; error if it is not installed, and
 ///   always error on Windows for the reason above.
-/// ``zero_copy_min_bytes`` sets the payload size at or above which received
-/// payloads are sliced from the receive buffer instead of copied. A slice keeps
-/// its whole backing chunk alive, so lowering it trades memory for CPU: good
-/// when payloads are consumed and dropped promptly, bad when they are retained.
-/// Defaults to 4096.
-///
 /// - ``"rustls"``: experimental, requires the ``rustls-transport`` cargo feature.
 ///   Keeps TLS on this thread in Rust and takes ``rustls_ca_file`` in place of
 ///   ``ssl_context``; client-certificate auth is not implemented.
+///
+/// ``zero_copy_min_bytes`` sets the payload size at or above which received
+/// payloads are sliced from the receive buffer instead of copied (default 4096).
+/// A slice keeps its whole backing chunk alive -- tens of KiB per read -- so a
+/// retained payload costs far more than its own length. That amplification
+/// applies to every sliced payload, including ones well above the threshold;
+/// the threshold only bounds it below itself. Measured with one 5000 B message
+/// per read and 20,000 messages all retained: 374.9 MB max RSS at the default
+/// against 100 MB of live payload, versus 145.6 MB with everything copied.
+///
+/// Lower it to skip more copies when payloads are consumed and dropped
+/// promptly. Raise it past your typical message size (or convert payloads to
+/// ``bytes`` on receipt) if you queue raw payloads deeply -- leaving the
+/// default will not bound retention for messages that take the slicing path.
 #[pyfunction]
 #[pyo3(signature = (uri, *, headers=None, subprotocols=None, ssl_context=None, connect_timeout=None, receive_timeout=None, proxy=None, compression=false, on_message=None, tls_backend="auto", rustls_ca_file=None, zero_copy_min_bytes=None))]
 #[allow(clippy::too_many_arguments)]

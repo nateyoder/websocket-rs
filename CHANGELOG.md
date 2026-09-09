@@ -20,15 +20,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   paired rounds against the previous build: **+17.7%** messages/s at 5 KiB
   [+4.71, +36.55], **+19.1%** at 8 KiB [+11.50, +63.93], **+30.6%** at 64 KiB
   [+16.34, +38.02]. Small payloads are unchanged by design (see the threshold
-  below) and measured slightly negative but unresolved: -3.0% [-4.72, +3.33] at
-  300 B on a quiet host, tracked as FOLLOWUPS F15.
+  below) and measured a small but likely-real regression: -3.0% [-4.72, +3.33]
+  at 300 B on a quiet host, with the same sign and 3/11 paired wins on a second
+  independent run (combined sign test p≈0.013). Tracked as FOLLOWUPS F15.
 - New `connect(zero_copy_min_bytes=...)` sets that threshold, defaulting to
-  4096. A slice keeps its whole backing chunk alive, so a small message retained
-  by the consumer pins a whole read's worth of buffer; copying below the
-  threshold bounds that. Lower it (to 0 to slice everything) when payloads are
-  consumed and dropped promptly -- measured **+18.7%** at 800 B and **+4.6%** at
-  300 B with the threshold at 64 -- and raise it when messages are retained.
-  It is a memory/CPU dial only: the bytes delivered are identical either way.
+  4096. A slice keeps its whole backing chunk alive -- tens of KiB per read --
+  so any retained payload costs far more than its own length. The threshold
+  bounds that only *below* itself: payloads at or above it are sliced and the
+  amplification applies to them too, with nothing capping the multiplier.
+  Measured with one 5000 B message per read and 20,000 messages all retained:
+  374.9 MB max RSS at the default against 100 MB of live payload, versus
+  145.6 MB with everything copied (`zero_copy_min_bytes=1<<30`). Lower it (to 0
+  to slice everything) when payloads are consumed and dropped promptly --
+  measured **+18.7%** at 800 B and **+4.6%** at 300 B with the threshold at 64.
+  Raise it *past your typical message size*, or convert payloads to `bytes` on
+  receipt, if you queue raw payloads deeply; leaving the default will not bound
+  retention for messages that take the slicing path. It is a memory/CPU dial
+  only: the bytes delivered are identical either way.
 - The parse pass no longer reads through a raw pointer into `State` while
   `State` is being mutated. Taking the received region as an owned `Bytes` up
   front removes that aliasing invariant along with the copies.

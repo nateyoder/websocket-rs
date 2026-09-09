@@ -86,7 +86,15 @@ class StubTransport:
 
 
 async def connect_over_stub(**connect_kwargs):
-    """Connect the native client to a StubTransport instead of a real socket."""
+    """Connect the native client to a StubTransport instead of a real socket.
+
+    The returned client is a ``NativeClientBuffered``. Driving it with
+    ``protocol.data_received(...)`` exercises the PyBytes receive path only; the
+    BufferedProtocol path (``get_buffer`` / ``buffer_updated``, where payloads
+    are sliced out of the Rust-owned receive buffer) is a different code path and
+    has to be fed through those hooks instead -- see
+    ``tests/test_recv_zero_copy.py::feed``.
+    """
     loop = asyncio.get_running_loop()
     original = loop.create_connection
     stub = StubTransport()
