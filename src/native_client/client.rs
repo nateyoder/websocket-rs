@@ -84,9 +84,19 @@ pub(crate) struct State {
     pub(crate) expected_accept: String,
     pub(crate) pending_pings: Option<Box<PingRegistry>>,
     pub(crate) pending_recv: VecDeque<Py<PyAny>>,
+    /// Receivers whose `done()` probe raised. They are never delivered to,
+    /// but are kept so teardown can still fail them; see `take_live_receiver`.
+    pub(crate) unprobeable_recv: Vec<Py<PyAny>>,
     /// Queue length at which the next sweep for cancelled receivers runs.
     /// Raised to twice the surviving count after each sweep so a genuinely
     /// large set of concurrent receivers is not rescanned on every recv().
+    /// The threshold only moves at a sweep, so retention between sweeps is
+    /// bounded by the *peak* concurrent receiver count, not the current one:
+    /// after a burst of N receivers that all cancel, those Futures are held
+    /// until either a frame arrives (delivery reclaims them) or the queue
+    /// climbs back to the threshold. Detecting that they went dead without a
+    /// frame would need a `done()` probe per parked entry on every recv(),
+    /// which is exactly the per-call cost the threshold exists to amortize.
     pub(crate) recv_sweep_at: usize,
     pub(crate) backlog: VecDeque<Py<WSMessage>>,
     /// Optional synchronous callback invoked after data_received finishes
@@ -203,18 +213,21 @@ impl State {
     /// that timed out leaves exactly such a Future parked here, so without this
     /// a timeout costs the caller the *next* message as well.
     ///
-    /// A Future whose `done()` probe raises is treated as dead. That direction
-    /// is the safe one: the message falls through to the backlog instead of
-    /// being handed to a receiver that may never consume it.
+    /// A Future whose `done()` probe raises is never delivered to. That
+    /// direction is the safe one: the message falls through to the backlog
+    /// instead of being handed to a receiver that may never consume it. It is
+    /// moved to `unprobeable_recv` rather than dropped, so it stays reachable
+    /// from `take_pending` and teardown can still fail its awaiter.
     fn take_live_receiver(&mut self, py: Python<'_>) -> Option<Py<PyAny>> {
         while let Some(future) = self.pending_recv.pop_front() {
-            let done = future
+            match future
                 .bind(py)
                 .call_method0(pyo3::intern!(py, "done"))
                 .and_then(|d| d.extract::<bool>())
-                .unwrap_or(true);
-            if !done {
-                return Some(future);
+            {
+                Ok(false) => return Some(future),
+                Ok(true) => {}
+                Err(_) => self.unprobeable_recv.push(future),
             }
         }
         None
@@ -227,15 +240,26 @@ impl State {
     /// polled with a timeout that receives nothing would otherwise retain one
     /// cancelled Future per expiry, unbounded. Sweeping costs one `done()` call
     /// per parked entry, so it is amortized against the threshold rather than
-    /// run on every recv().
+    /// run on every recv(). Between sweeps the retained set is therefore
+    /// bounded by the peak concurrent receiver count, not the current one.
+    ///
+    /// As in `take_live_receiver`, an entry whose probe raises is quarantined
+    /// instead of dropped so teardown can still fail it.
     fn park_receiver(&mut self, py: Python<'_>, future: Py<PyAny>) {
         if self.pending_recv.len() >= self.recv_sweep_at {
-            self.pending_recv.retain(|f| {
-                !f.bind(py)
+            let mut live = VecDeque::with_capacity(self.pending_recv.len());
+            for parked in std::mem::take(&mut self.pending_recv) {
+                match parked
+                    .bind(py)
                     .call_method0(pyo3::intern!(py, "done"))
                     .and_then(|d| d.extract::<bool>())
-                    .unwrap_or(true)
-            });
+                {
+                    Ok(false) => live.push_back(parked),
+                    Ok(true) => {}
+                    Err(_) => self.unprobeable_recv.push(parked),
+                }
+            }
+            self.pending_recv = live;
             self.recv_sweep_at = RECV_SWEEP_MIN.max(self.pending_recv.len().saturating_mul(2));
         }
         self.pending_recv.push_back(future);
@@ -243,6 +267,7 @@ impl State {
 
     fn take_pending(&mut self) -> VecDeque<Py<PyAny>> {
         let mut pending = std::mem::take(&mut self.pending_recv);
+        pending.extend(self.unprobeable_recv.drain(..));
         if let Some(future) = self.handshake_fut.take() {
             pending.push_back(future);
         }
@@ -1730,15 +1755,17 @@ impl NativeClient {
     }
 
     /// Fail `future` unless it reports done. Teardown policy, deliberately
-    /// the opposite default of `set_future_result`: when the probe errors,
-    /// assume settled and skip, and swallow the set_exception result —
-    /// cleanup must not throw over an already-dead connection.
+    /// the opposite default of `set_future_result`: when the probe errors we
+    /// cannot prove the awaiter is settled, so try to fail it anyway and
+    /// swallow the result — on an already-settled Future `set_exception`
+    /// merely raises `InvalidStateError`, whereas skipping would hang an
+    /// awaiter that was in fact still waiting. Either way cleanup must not
+    /// throw over an already-dead connection.
     fn set_future_exception(py: Python<'_>, future: &Bound<'_, PyAny>, error: PyErr) {
-        if !future
+        let done = future
             .call_method0(pyo3::intern!(py, "done"))
-            .and_then(|done| done.extract::<bool>())
-            .unwrap_or(true)
-        {
+            .and_then(|done| done.extract::<bool>());
+        if !matches!(done, Ok(true)) {
             let _ = future.call_method1("set_exception", (error,));
         }
     }

@@ -133,3 +133,87 @@ async def test_cancelled_waiters_do_not_accumulate_without_traffic():
         assert retained < 100, f"{retained} of 5000 cancelled waiters still retained"
     finally:
         ws.close()
+
+
+class _UnprobeableFuture(asyncio.Future):
+    """A Future whose `done()` probe raises while `probe_raises` is set.
+
+    Not reachable with a real asyncio.Future, but the client's delivery and
+    sweep paths both have to decide what to do when the probe errors, and this
+    pins that decision down.
+    """
+
+    probe_raises = True
+
+    def done(self):
+        if self.probe_raises:
+            raise RuntimeError("done() probe failed")
+        return super().done()
+
+
+async def _connect_with_unprobeable_futures():
+    """Connect over the stub, then make every later recv() Future unprobeable."""
+    loop = asyncio.get_running_loop()
+    original = loop.create_future
+    armed = []
+    parked = []
+
+    def create_future():
+        if not armed:
+            return original()  # the handshake Future must stay a real one
+        fut = _UnprobeableFuture(loop=loop)
+        parked.append(fut)
+        return fut
+
+    loop.create_future = create_future
+    try:
+        ws, stub = await connect_over_stub()
+    except BaseException:
+        loop.create_future = original
+        raise
+    armed.append(True)
+    return ws, stub, parked, original
+
+
+async def test_unprobeable_waiter_never_receives_a_message():
+    """A receiver we cannot prove is live must not be handed the frame."""
+    ws, stub, parked, original = await _connect_with_unprobeable_futures()
+    try:
+        fut = ws.recv()
+        assert isinstance(fut, _UnprobeableFuture)
+
+        stub.protocol.data_received(text_frame(b"queued"))
+
+        # The frame went to the backlog, not to the unprobeable waiter.
+        fut.probe_raises = False
+        assert not fut.done()
+        fut.cancel()
+    finally:
+        asyncio.get_running_loop().create_future = original
+        ws.close()
+        for f in parked:
+            f.probe_raises = False
+            if not f.done():
+                f.cancel()
+
+
+async def test_unprobeable_waiter_is_still_failed_at_close():
+    """Skipping it for delivery must not make it unreachable to teardown."""
+    ws, stub, parked, original = await _connect_with_unprobeable_futures()
+    try:
+        fut = ws.recv()
+        # Delivery drops it out of the live queue; close must still fail it.
+        stub.protocol.data_received(text_frame(b"queued"))
+
+        ws.close()
+        await asyncio.sleep(0)
+
+        fut.probe_raises = False
+        assert fut.done(), "unprobeable waiter was never settled at close"
+        assert isinstance(fut.exception(), ConnectionError)
+    finally:
+        asyncio.get_running_loop().create_future = original
+        for f in parked:
+            f.probe_raises = False
+            if not f.done():
+                f.cancel()

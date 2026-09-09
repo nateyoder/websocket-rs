@@ -27,7 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expiry -- 5,000 of 5,000 in the regression test. Parking a receiver now sweeps
   settled entries once the queue passes a threshold, which is then raised to
   twice the surviving count so a genuinely large set of concurrent receivers is
-  not rescanned on every `recv()`.
+  not rescanned on every `recv()`. The threshold only moves at a sweep, so what
+  this bounds is retention by the *peak* concurrent receiver count rather than
+  by the current one: after a burst of N receivers that all cancel, those
+  Futures are held until a frame arrives (delivery reclaims them) or the queue
+  climbs back to the threshold. Tightening that to current concurrency would
+  cost a `done()` probe per parked entry on every `recv()`, which is the cost
+  the threshold exists to avoid on the receive hot path.
+- A receiver whose `done()` probe raises is now kept in a quarantine list
+  instead of being dropped: it is still never delivered to, but it stays
+  reachable from teardown, so closing the connection fails its awaiter with
+  `ConnectionError` rather than leaving it hung. Teardown correspondingly tries
+  `set_exception` when the probe errors, since it cannot prove the awaiter is
+  already settled and the call is harmless if it is.
 - Measured neutral on the receive hot path against the previous build: +0.47%
   [-0.19, +2.12] at 256 B and -0.01% [-0.56, +0.22] at 8 KiB, 15 alternating
   paired rounds of plain-TCP request/response, both intervals containing zero.

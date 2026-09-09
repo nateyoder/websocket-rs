@@ -97,6 +97,7 @@ fn connect<'py>(
             expected_accept,
             pending_pings: Default::default(),
             pending_recv: VecDeque::new(),
+            unprobeable_recv: Vec::new(),
             recv_sweep_at: RECV_SWEEP_MIN,
             backlog: VecDeque::new(),
             on_message,
