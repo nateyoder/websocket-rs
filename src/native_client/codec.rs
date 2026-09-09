@@ -2,6 +2,7 @@
 //! parsing, and the shared frame walker used by the frame-aligned receive
 //! fast paths (ProtocolCore::next_event keeps its own walk for fragmented
 //! and compressed traffic).
+use bytes::Bytes;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
@@ -169,6 +170,11 @@ pub(crate) enum PayloadMode<'py, 'a> {
     /// Zero-copy: wrap a slice of the incoming `PyBytes` as the `Bytes`
     /// owner. No memcpy of message payloads on this path.
     ZeroCopy { pb: &'a Bound<'py, PyBytes> },
+    /// Zero-copy over a Rust-owned receive buffer. `Bytes::slice` is a refcount
+    /// bump, so payloads carved out of the buffer the kernel already wrote into
+    /// cost nothing. Used by the BufferedProtocol path, which has no incoming
+    /// `PyBytes` to borrow from.
+    ZeroCopyOwned { owner: &'a Bytes },
 }
 
 pub(crate) struct FastFrame<'a> {

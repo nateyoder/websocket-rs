@@ -93,3 +93,33 @@ DONE (with the closing PR) once merged.
   server-side ping bookkeeping. Next step = capture a failing run with a packet
   trace rather than reasoning from the client side, since the client side is now
   substantially excluded.
+
+- [ ] F15: Zero-copy receive is a likely-real small regression for payloads
+  below the copy threshold: -3.0% [-4.72, +3.33] at 300 B on a quiet host,
+  -3.75% on a loaded one, 3/11 paired wins both times. The confidence intervals
+  span zero, but the sign test is the stronger statistic here: 3/11 is p≈0.11
+  on its own under a fair-coin null, and the same sign with the same 3/11 on an
+  independent run puts the combined evidence near p≈0.013. Treat it as real and
+  small, not unresolved. Hypothesis: below the threshold a read pays the
+  per-read `split_to().freeze()` (which promotes `BytesMut` to its shared
+  representation) and gets nothing back, because every payload is copied anyway.
+  Candidate fix = skip the freeze and parse in place with `PayloadMode::Copy` as
+  before when `recv_buf.len() < zero_copy_min`, since the buffer cannot then
+  contain a payload at or above the threshold. Gate on the buffer length rather
+  than on this read's `nbytes`: a small read can complete a large partial frame
+  carried over from earlier reads, and copying that payload would be correct but
+  would lose the fast path on every fragmented large frame. Worth resolving
+  because a high-rate small-frame feed (order-book deltas, tick streams) sits
+  entirely in this regime. Measure on a quiet host; the second run above was
+  contaminated by a concurrent build.
+
+  Confirmed by direct measurement: with `zero_copy_min_bytes=0` (slice every
+  payload, never copy) against the pre-change baseline, on a receive-only push
+  feed over 11 alternating paired rounds, throughput improves at every size --
+  300 B +4.71% [+0.34, +8.29] 9/11; 800 B +17.30% [+7.49, +24.18] 10/11;
+  5 KiB +21.29% [+14.08, +38.74] 11/11. So slicing is a win even for small
+  frames, and the small-payload regression above is a property of the *copy*
+  path, which pays the per-read freeze and gets nothing back -- exactly the
+  hypothesis stated here. The fix is unchanged (skip the freeze when the
+  buffer cannot hold a payload at or above the threshold, gated on
+  `recv_buf.len()`), is not implemented in this PR, and stays tracked.

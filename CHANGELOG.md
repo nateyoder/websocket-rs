@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 0.7.11
 
+### Performance
+
+- **The BufferedProtocol receive path no longer copies every message payload.**
+  `parse_recv_data` -- the path uvloop uses for every `ws://` connection -- ran
+  with `PayloadMode::Copy`, so each message cost a full `Bytes::copy_from_slice`
+  of its payload. A sampling profile of a receive-only feed put memmove at 20%
+  of main-thread time. `recv_buf` is now a `BytesMut`; each read's received
+  region is taken with `split_to().freeze()` (O(1), allocation shared) and
+  payloads at or above `zero_copy_min_bytes` are handed out as `Bytes::slice`
+  of it -- a refcount bump. Measured on a receive-only push feed, 11 alternating
+  paired rounds against the previous build: **+17.7%** messages/s at 5 KiB
+  [+4.71, +36.55], **+19.1%** at 8 KiB [+11.50, +63.93], **+30.6%** at 64 KiB
+  [+16.34, +38.02]. Small payloads are unchanged by design (see the threshold
+  below) and measured a small but likely-real regression: -3.0% [-4.72, +3.33]
+  at 300 B on a quiet host, with the same sign and 3/11 paired wins on a second
+  independent run (combined sign test p≈0.013). That regression belongs to the
+  *copy* path, not to slicing: with the threshold at 0 the same 300 B feed gains
+  +4.71% (see below). It is the per-read `split_to().freeze()` being paid by
+  reads that then copy every payload anyway. Tracked as FOLLOWUPS F15.
+- New `connect(zero_copy_min_bytes=...)` sets that threshold, defaulting to
+  4096. A slice keeps its whole backing chunk alive -- tens of KiB per read --
+  so any retained payload costs far more than its own length. The threshold
+  bounds that only *below* itself: payloads at or above it are sliced and the
+  amplification applies to them too, with nothing capping the multiplier.
+  Measured with one 5000 B message per read and 20,000 messages all retained:
+  374.9 MB max RSS at the default against 100 MB of live payload, versus
+  145.6 MB with everything copied (`zero_copy_min_bytes=1<<30`). Lower it (to 0
+  to slice everything) when payloads are consumed and dropped promptly: slicing
+  is faster at every size measured, not just large ones. With
+  `zero_copy_min_bytes=0` against the previous build, receive-only push feed,
+  11 alternating paired rounds -- **+4.71%** at 300 B [+0.34, +8.29] 9/11,
+  **+17.30%** at 800 B [+7.49, +24.18] 10/11, **+21.29%** at 5 KiB
+  [+14.08, +38.74] 11/11.
+  Raise it *past your typical message size*, or convert payloads to `bytes` on
+  receipt, if you queue raw payloads deeply; leaving the default will not bound
+  retention for messages that take the slicing path. It is a memory/CPU dial
+  only: the bytes delivered are identical either way.
+- The parse pass no longer reads through a raw pointer into `State` while
+  `State` is being mutated. Taking the received region as an owned `Bytes` up
+  front removes that aliasing invariant along with the copies.
+
+
 ### Fixed
 
 - **A canceled `recv()` no longer swallows the next message.** `deliver_message`
