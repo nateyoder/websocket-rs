@@ -46,10 +46,19 @@ sessions.
 pip install 'websocket-rs[fast-tls]'
 ```
 
-aiofastnet is an *optional* dependency. With `tls_backend="auto"` a missing or
-broken install degrades silently to the stdlib path — the connect still succeeds,
-just slower. Callers who would rather fail than quietly run slow should pass
+aiofastnet is an *optional* dependency. With `tls_backend="auto"` a missing (or
+unimportable) install degrades silently to the stdlib path — the connect still
+succeeds, just slower. The fallback covers import failure only: if an installed
+aiofastnet imports but then fails inside `create_connection`, that error
+propagates out of `connect()`. The extra is pinned `aiofastnet>=1.1.0,<2` so a
+future incompatible signature change cannot reach that path unannounced. Callers
+who would rather fail than quietly run slow should pass
 `tls_backend="aiofastnet"`, which raises `RuntimeError` when it is unavailable.
+
+On Windows aiofastnet is never selected: it registers its I/O with
+`loop.add_reader`, which the default ProactorEventLoop does not implement.
+`"auto"` stays on the stdlib asyncio path there, and `tls_backend="aiofastnet"`
+raises `RuntimeError` naming that gap rather than failing mid-connect.
 
 Resolution is memoised per process, so the import never runs on the connect path
 more than once.

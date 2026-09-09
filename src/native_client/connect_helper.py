@@ -1,6 +1,7 @@
 
 import asyncio as _asyncio
 import socket as _socket
+import sys as _sys
 from functools import partial as _partial
 
 
@@ -85,6 +86,13 @@ def _parse_proxy_uri(proxy):
 _AIOFASTNET_UNRESOLVED = object()
 _aiofastnet_create_connection = _AIOFASTNET_UNRESOLVED
 
+# aiofastnet registers its socket with ``loop.add_reader``, which the Windows
+# default event loop (ProactorEventLoop since 3.8) does not implement, so every
+# wss:// connect would raise NotImplementedError. The gate is deliberately the
+# whole platform rather than a probe of the running loop: Windows is untested
+# here, and a narrower rule is what produced the bug in the first place.
+_IS_WINDOWS = _sys.platform == "win32"
+
 
 def _resolve_aiofastnet():
     """Return ``aiofastnet.create_connection``, or None when unavailable.
@@ -108,9 +116,19 @@ def _select_create_connection(loop, is_tls, tls_backend):
     Only wss:// is routed through aiofastnet: the plain-TCP path already runs
     on asyncio's BufferedProtocol fast path, and the measured win is in the TLS
     layer. "auto" prefers aiofastnet when importable, "aiofastnet" demands it,
-    "asyncio" pins the stdlib path.
+    "asyncio" pins the stdlib path. On Windows aiofastnet is never selected:
+    "auto" stays on asyncio and "aiofastnet" is an error.
     """
     if not is_tls or tls_backend == "asyncio":
+        return loop.create_connection
+    if _IS_WINDOWS:
+        if tls_backend == "aiofastnet":
+            raise RuntimeError(
+                'tls_backend="aiofastnet" is not supported on Windows: aiofastnet '
+                "drives its I/O through loop.add_reader, which the Windows default "
+                "ProactorEventLoop does not implement. Use tls_backend=\"auto\" or "
+                '"asyncio".'
+            )
         return loop.create_connection
     create_connection = _resolve_aiofastnet()
     if create_connection is None:

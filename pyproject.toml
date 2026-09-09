@@ -42,7 +42,7 @@ dependencies = []
 # aiofastnet automatically when it is importable and falls back to the stdlib
 # ssl path otherwise, so this extra is purely a performance opt-in.
 fast-tls = [
-    "aiofastnet>=1.1.0",
+    "aiofastnet>=1.1.0,<2",
 ]
 dev = [
     "maturin>=1.0",
@@ -50,14 +50,14 @@ dev = [
     "pytest-asyncio>=1.3.0",
     "websockets>=12.0",
     "ruff>=0.1.0",
-    "aiofastnet>=1.1.0",
+    "aiofastnet>=1.1.0,<2",
 ]
 test = [
     "pytest>=7.0",
     "pytest-asyncio>=1.3.0",
     "websockets>=12.0",
     # tests/test_tls_backends.py skips the aiofastnet cells without it.
-    "aiofastnet>=1.1.0",
+    "aiofastnet>=1.1.0,<2",
 ]
 benchmark = [
     "uvloop>=0.22.1",
@@ -102,5 +102,5 @@ dev = [
     "granian>=2.7.3; sys_platform != 'win32'",
     "picows>=1.18.0; sys_platform != 'win32'",
     "pytest-asyncio>=1.3.0",
-    "aiofastnet>=1.1.0",
+    "aiofastnet>=1.1.0,<2",
 ]
