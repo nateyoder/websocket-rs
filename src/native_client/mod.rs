@@ -44,9 +44,12 @@ use crate::DEFAULT_CONNECT_TIMEOUT;
 ///
 /// ``tls_backend`` selects which transport carries wss:// traffic and is ignored
 /// for ws://:
-/// - ``"auto"`` (default): aiofastnet when importable, otherwise asyncio.
+/// - ``"auto"`` (default): aiofastnet when importable, otherwise asyncio. Never
+///   on Windows: aiofastnet needs ``loop.add_reader``, which the default
+///   ProactorEventLoop does not implement, so ``auto`` stays on asyncio there.
 /// - ``"asyncio"``: pin the stdlib ``loop.create_connection`` + SSLProtocol path.
-/// - ``"aiofastnet"``: require aiofastnet; error if it is not installed.
+/// - ``"aiofastnet"``: require aiofastnet; error if it is not installed, and
+///   always error on Windows for the reason above.
 /// - ``"rustls"``: experimental, requires the ``rustls-transport`` cargo feature.
 ///   Keeps TLS on this thread in Rust and takes ``rustls_ca_file`` in place of
 ///   ``ssl_context``; client-certificate auth is not implemented.

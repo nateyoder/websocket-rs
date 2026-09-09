@@ -156,11 +156,14 @@ async def connect(
         falls back to ``loop.create_connection`` otherwise. aiofastnet's
         OpenSSL transport measured ~+10% request throughput at both 256 B and
         8 KiB versus asyncio's SSLProtocol; install it with the ``fast-tls``
-        extra.
+        extra. On Windows aiofastnet is never selected — it registers I/O with
+        ``loop.add_reader``, which the default ProactorEventLoop does not
+        implement — so ``"auto"`` always uses the stdlib path there.
       * ``"asyncio"`` pins the stdlib path.
       * ``"aiofastnet"`` requires aiofastnet and raises ``RuntimeError`` if it
         is not installed, for callers who would rather fail than silently run
-        slower.
+        slower. It also raises ``RuntimeError`` on Windows, where the backend
+        is unsupported, before any socket work happens.
       * ``"rustls"`` is experimental and only present in builds made with the
         ``rustls-transport`` cargo feature; it terminates TLS in Rust on the
         event-loop thread. It takes ``rustls_ca_file`` instead of

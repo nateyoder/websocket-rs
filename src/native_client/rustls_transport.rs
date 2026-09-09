@@ -185,17 +185,10 @@ impl RustlsTransport {
         let inner = self.state.borrow().inner.as_ref().map(|c| c.clone_ref(py));
         if let Some(c) = inner {
             let c = c.borrow(py);
-            // Mirror NativeClient::data_received: queued callbacks are flushed
-            // whether or not the parse succeeded, and the parse result is only
-            // returned afterwards. Dropping the flush on a parse error would
-            // swallow on_message callbacks queued before the failure.
-            let result = if plain.is_empty() {
-                Ok(())
-            } else {
-                c.data_received_inner(py, &plain)
-            };
-            c.flush_pending_callbacks(py)?;
-            result?;
+            // One shared policy with NativeClient::data_received rather than a
+            // second copy here: queued callbacks are flushed whether or not the
+            // parse succeeded, and the parse result is returned afterwards.
+            c.data_received_plaintext(py, &plain)?;
         }
         plain.clear();
         self.state.borrow_mut().plaintext = plain;

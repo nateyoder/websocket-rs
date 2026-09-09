@@ -372,3 +372,40 @@ async def test_rustls_backend_is_inert_on_plain_tcp():
             assert bytes(await asyncio.wait_for(ws.recv(), RECV_TIMEOUT)) == b"plain"
         finally:
             ws.close()
+
+
+@pytest.mark.skipif(not _rustls_available(), reason="built without the rustls-transport feature")
+async def test_rustls_delivers_on_message_callbacks(certs):
+    """The rustls shim owns callback delivery for every record it decrypts.
+
+    Messages parsed out of decrypted plaintext are only queued during the parse;
+    the shim's own flush is what hands them to ``on_message``. Nothing else in
+    the suite drives the callback path over rustls, so dropping that flush would
+    otherwise go unnoticed. The server writes both frames in a single raw
+    ``transport.write`` so they arrive in one record and one ``data_received``.
+    """
+    cert, key = certs
+    seen = []
+    done = asyncio.get_running_loop().create_future()
+
+    def on_message(message):
+        seen.append(bytes(message))
+        if len(seen) == 2 and not done.done():
+            done.set_result(True)
+
+    async def burst(ws):
+        ws.transport.write(b"\x81\x05first\x81\x06second")
+        await ws.wait_closed()
+
+    async with _Peer(cert, key, handler=burst) as peer:
+        ws = await connect(
+            peer.url,
+            connect_timeout=10,
+            on_message=on_message,
+            **_backend_kwargs("rustls", cert),
+        )
+        try:
+            await asyncio.wait_for(done, RECV_TIMEOUT)
+        finally:
+            ws.close()
+    assert seen == [b"first", b"second"]

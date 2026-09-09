@@ -615,9 +615,11 @@ impl NativeClient {
         // Try PyBytes zero-copy fast path (asyncio.Protocol gives PyBytes which
         // is immutable, so wrapping its buffer as a Bytes owner avoids the
         // per-frame memcpy). Fall back to slice extraction otherwise.
-        let result = if let Ok(pb) = data.cast::<PyBytes>() {
+        if let Ok(pb) = data.cast::<PyBytes>() {
             let bytes = pb.as_bytes();
-            self.data_received_inner_pybytes(py, pb, bytes)
+            let result = self.data_received_inner_pybytes(py, pb, bytes);
+            self.flush_pending_callbacks(py)?;
+            result
         } else {
             let buf = pyo3::buffer::PyBuffer::<u8>::get(data)?;
             // Reject non-contiguous or multi-dimensional buffers — treating
@@ -630,10 +632,8 @@ impl NativeClient {
             }
             let slice: &[u8] =
                 unsafe { std::slice::from_raw_parts(buf.buf_ptr() as *const u8, buf.item_count()) };
-            self.data_received_inner(py, slice)
-        };
-        self.flush_pending_callbacks(py)?;
-        result
+            self.data_received_plaintext(py, slice)
+        }
     }
 
     /// Called by asyncio transport when its send buffer crosses the high-water mark.
@@ -1752,6 +1752,24 @@ impl NativeClient {
         let pending = state.take_pending();
         let transport = state.transport.as_ref().map(|t| t.clone_ref(py));
         (pending, transport)
+    }
+
+    /// Parse `data` and then flush queued `on_message` callbacks, returning the
+    /// parse result last.
+    ///
+    /// The ordering is the policy: callbacks queued before a failure must still
+    /// reach the user, so the flush cannot be skipped when the parse errors.
+    /// Every caller that feeds plaintext in from outside the pyclass
+    /// `data_received` (today the rustls shim) goes through here, so the policy
+    /// lives in one place and cannot drift between transports.
+    pub(super) fn data_received_plaintext(&self, py: Python<'_>, data: &[u8]) -> PyResult<()> {
+        let result = if data.is_empty() {
+            Ok(())
+        } else {
+            self.data_received_inner(py, data)
+        };
+        self.flush_pending_callbacks(py)?;
+        result
     }
 
     fn apply_peer_close(
