@@ -112,3 +112,14 @@ DONE (with the closing PR) once merged.
   because a high-rate small-frame feed (order-book deltas, tick streams) sits
   entirely in this regime. Measure on a quiet host; the second run above was
   contaminated by a concurrent build.
+
+  Confirmed by direct measurement: with `zero_copy_min_bytes=0` (slice every
+  payload, never copy) against the pre-change baseline, on a receive-only push
+  feed over 11 alternating paired rounds, throughput improves at every size --
+  300 B +4.71% [+0.34, +8.29] 9/11; 800 B +17.30% [+7.49, +24.18] 10/11;
+  5 KiB +21.29% [+14.08, +38.74] 11/11. So slicing is a win even for small
+  frames, and the small-payload regression above is a property of the *copy*
+  path, which pays the per-read freeze and gets nothing back -- exactly the
+  hypothesis stated here. The fix is unchanged (skip the freeze when the
+  buffer cannot hold a payload at or above the threshold, gated on
+  `recv_buf.len()`), is not implemented in this PR, and stays tracked.
