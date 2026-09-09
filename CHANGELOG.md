@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 0.7.11
 
+### Changed
+
+- **Published as `websocket-rs-nateyoder`.** The PyPI name `websocket-rs` belongs
+  to upstream, so this fork ships under its own distribution name. The import
+  name is unchanged -- `module-name = "websocket_rs"` keeps `import websocket_rs`
+  working -- so it is a drop-in replacement, but the two distributions must not
+  be installed together: they would occupy the same import name. Project URLs now
+  point at the fork rather than misattributing it to upstream.
+
 ### Performance
 
 - **The BufferedProtocol receive path no longer copies every message payload.**

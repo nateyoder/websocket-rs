@@ -1,7 +1,14 @@
 # WebSocket-RS 🚀
 
-[![Tests](https://github.com/coseto6125/websocket-rs/actions/workflows/test.yml/badge.svg)](https://github.com/coseto6125/websocket-rs/actions/workflows/test.yml)
-[![Release](https://github.com/coseto6125/websocket-rs/actions/workflows/release.yml/badge.svg)](https://github.com/coseto6125/websocket-rs/actions/workflows/release.yml)
+> **This is a fork.** It is published to PyPI as **`websocket-rs-nateyoder`** and
+> imports as `websocket_rs`, so it is a drop-in replacement for the upstream
+> package. Upstream is [coseto6125/websocket-rs](https://github.com/coseto6125/websocket-rs);
+> the fork carries changes not yet released there. Depend on exactly one of the
+> two — installing both would put two distributions in the same import name.
+
+
+[![Tests](https://github.com/nateyoder/websocket-rs/actions/workflows/test.yml/badge.svg)](https://github.com/nateyoder/websocket-rs/actions/workflows/test.yml)
+[![Release](https://github.com/nateyoder/websocket-rs/actions/workflows/release.yml/badge.svg)](https://github.com/nateyoder/websocket-rs/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 [English](README.md) | [繁體中文](README.zh-TW.md)
