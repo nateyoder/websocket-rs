@@ -21,11 +21,33 @@ DONE (with the closing PR) once merged.
   regression; a buffer-lifetime redesign needs its own tests. This is the
   blocker for doing TLS and framing in one Rust package.
 
-- [ ] F10: `wss://` returns a bare `NativeClient`, not `NativeClientBuffered`,
-  because asyncio's SSLProtocol delivers ≤16 KiB chunks and BufferedProtocol was
-  net-negative there. aiofastnet exports `aiofn_is_buffered_protocol`, so its
-  TLS transport may support the buffered path with different chunking. Untested
-  — measure before assuming the old conclusion carries over.
+- [x] F10: **Measured, not a win. Do not re-run without a new hypothesis.**
+  Routing `wss://` through `NativeClientBuffered` on the aiofastnet transport
+  (which decrypts straight into the protocol's buffer, unlike asyncio's
+  SSLProtocol) is neutral: request/response +0.53% / +0.20% / −0.81% at
+  256 B / 8 KiB / 64 KiB, and pipelined at window 32, +0.53% [+0.12, +0.95] at
+  8 KiB and −0.19% at 64 KiB. 15 paired rounds each; nothing approaches the +2%
+  gate. The first attempt measured nothing at all, because aiofastnet gates on
+  `isinstance(protocol, asyncio.BufferedProtocol)` and this pyclass is not a
+  subclass, so the buffered path never engaged; the numbers above come from a
+  build adding `is_buffered_protocol()`, which aiofastnet honours, and which
+  genuinely takes the path. That method was not kept — it is API surface for a
+  neutral result.
+
+- [ ] F14: `NativeClientBuffered`'s zero-copy receive path is **uvloop-only**.
+  uvloop duck-types the BufferedProtocol hooks; stdlib asyncio gates on
+  `isinstance(protocol, asyncio.BufferedProtocol)` (`selector_events.py`), and
+  this is a pyclass rather than a subclass, so under plain asyncio the transport
+  falls back to `data_received` and the hooks are dead code. Verified with an
+  instrumented duck-typed protocol: stdlib asyncio called only `data_received`;
+  uvloop called `get_buffer`/`buffer_updated`. Nothing is broken, but the
+  documented ~15% pipelined win is unavailable to anyone not on uvloop.
+  Recovering it needs the class to actually satisfy `isinstance`:
+  `#[pyclass(subclass)]` plus a Python-level subclass of
+  `asyncio.BufferedProtocol` that `connect()` instantiates for `ws://`. Not
+  attempted — the repo's benchmarks and this project's deployment target both
+  use uvloop, so the win accrues to other users, and the change touches object
+  construction on every connect.
 
 - [ ] F11: `tls_backend="rustls"` has no SOCKS5 path. `_connect_helper` hands
   the pre-connected socket to the selected `create_connection`, which
