@@ -1,0 +1,9 @@
+xxxxxx                                                                   [100%]
+=========================== short test summary info ============================
+XFAIL tests/probe_perf_findings.py::test_cancelled_receive_does_not_consume_next_message - main retains canceled recv futures and discards the next message
+XFAIL tests/probe_perf_findings.py::test_resume_honors_transport_repause - resume_writing keeps flushing after a reentrant pause_writing
+XFAIL tests/probe_perf_findings.py::test_small_message_retention_under_one_megabyte - tiny WSMessage keeps the entire source PyBytes alive
+XFAIL tests/probe_perf_findings.py::test_reclaims_completed_large_receive_buffer - receive scratch retains its high-water capacity indefinitely
+XFAIL tests/probe_perf_findings.py::test_cancelled_receive_on_real_connection[asyncio] - canceled native recv consumes a real echoed network message
+XFAIL tests/probe_perf_findings.py::test_cancelled_receive_on_real_connection[uvloop] - canceled native recv consumes a real echoed network message
+6 xfailed in 1.15s

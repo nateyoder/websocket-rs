@@ -28,6 +28,10 @@ jobs:
       - name: Run clippy
         run: cargo clippy -- -D warnings
 
+      # The rustls transport is off by default, so nothing above compiles it.
+      - name: Run clippy (rustls-transport)
+        run: cargo clippy --features rustls-transport -- -D warnings
+
       # Unit tests live in the Rust lib (codec/protocol/mod). They link
       # libpython, so pyo3's extension-module feature must stay off; the
       # interpreter's lib dir must be on the loader path for the test binary.
@@ -39,6 +43,7 @@ jobs:
           # dyld ignores LD_LIBRARY_PATH; give macOS the same search path.
           export DYLD_FALLBACK_LIBRARY_PATH="$LD_LIBRARY_PATH"
           cargo test --lib --no-default-features
+          cargo test --lib --no-default-features --features rustls-transport
 
   test:
     name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -84,13 +89,24 @@ jobs:
         # `maturin develop` syncing uv.lock — named here so the suite does not
         # depend on that. uvloop is the loop this client targets, and this matrix
         # is Linux-only, so it is always installable.
-        run: uv pip install maturin pytest pytest-asyncio websockets uvloop
+        # aiofastnet is optional at runtime but required here: without it
+        # tests/test_tls_backends.py skips the aiofastnet cells, which is the
+        # transport wss:// defaults to.
+        run: uv pip install maturin pytest pytest-asyncio websockets uvloop aiofastnet
 
       - name: Build
         run: maturin develop --release
 
       - name: Run tests
         run: pytest tests/
+
+      # Rebuild with the experimental TLS backend so its end-to-end cells in
+      # tests/test_tls_backends.py stop being skipped.
+      - name: Build with rustls-transport
+        run: maturin develop --release --features rustls-transport
+
+      - name: Run TLS backend tests (rustls-transport)
+        run: pytest tests/test_tls_backends.py
 
   build:
     name: Build wheels

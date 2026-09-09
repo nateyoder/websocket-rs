@@ -1,0 +1,12 @@
+{
+  "main": {
+    "returncode": 0,
+    "stdout": "{\"fragmented_text\": \"pass\", \"protocol_pong\": \"pass\", \"ordered_32_message_burst\": \"pass\", \"untrusted_certificate_rejected\": \"pass\"}\n",
+    "stderr": ""
+  },
+  "tls_aiofastnet": {
+    "returncode": 0,
+    "stdout": "{\"fragmented_text\": \"pass\", \"protocol_pong\": \"pass\", \"ordered_32_message_burst\": \"pass\", \"untrusted_certificate_rejected\": \"pass\"}\n",
+    "stderr": ""
+  }
+}

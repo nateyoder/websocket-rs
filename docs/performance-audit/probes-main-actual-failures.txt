@@ -1,0 +1,123 @@
+FFFFFF                                                                   [100%]
+=================================== FAILURES ===================================
+_____________ test_cancelled_receive_does_not_consume_next_message _____________
+tests/probe_perf_findings.py:38: in test_cancelled_receive_does_not_consume_next_message
+    asyncio.run(scenario())
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/runners.py:196: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/runners.py:119: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/base_events.py:725: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+tests/probe_perf_findings.py:32: in scenario
+    assert live.done(), "message was consumed by canceled receive"
+E   AssertionError: message was consumed by canceled receive
+E   assert False
+E    +  where False = <built-in method done of _asyncio.Future object at 0x10708e690>()
+E    +    where <built-in method done of _asyncio.Future object at 0x10708e690> = <Future pending>.done
+_____________________ test_resume_honors_transport_repause _____________________
+tests/probe_perf_findings.py:56: in test_resume_honors_transport_repause
+    asyncio.run(scenario())
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/runners.py:196: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/runners.py:119: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/base_events.py:725: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+tests/probe_perf_findings.py:52: in scenario
+    assert t.writes - before == 1
+E   assert (101 - 1) == 1
+E    +  where 101 = <perf_audit.Transport object at 0x107063b10>.writes
+_______________ test_small_message_retention_under_one_megabyte ________________
+tests/probe_perf_findings.py:78: in test_small_message_retention_under_one_megabyte
+    asyncio.run(scenario())
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/runners.py:196: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/runners.py:119: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/base_events.py:725: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+tests/probe_perf_findings.py:76: in scenario
+    assert retained < 1048576, retained
+E   AssertionError: 8395506
+E   assert 8395506 < 1048576
+_________________ test_reclaims_completed_large_receive_buffer _________________
+tests/probe_perf_findings.py:94: in test_reclaims_completed_large_receive_buffer
+    asyncio.run(scenario())
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/runners.py:196: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/runners.py:119: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/base_events.py:725: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+tests/probe_perf_findings.py:92: in scenario
+    assert capacity <= 262144, capacity
+E   AssertionError: 16777216
+E   assert 16777216 <= 262144
+______________ test_cancelled_receive_on_real_connection[asyncio] ______________
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/tasks.py:507: in wait_for
+    return await fut
+           ^^^^^^^^^
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests/probe_perf_findings.py:123: in test_cancelled_receive_on_real_connection
+    runner.run(scenario())
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/runners.py:119: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/base_events.py:725: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+tests/probe_perf_findings.py:117: in scenario
+    assert bytes(await asyncio.wait_for(live, 0.5)) == b"only-message"
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/tasks.py:506: in wait_for
+    async with timeouts.timeout(timeout):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/timeouts.py:117: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+______________ test_cancelled_receive_on_real_connection[uvloop] _______________
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/tasks.py:507: in wait_for
+    return await fut
+           ^^^^^^^^^
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests/probe_perf_findings.py:123: in test_cancelled_receive_on_real_connection
+    runner.run(scenario())
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/runners.py:119: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+uvloop/loop.pyx:1518: in uvloop.loop.Loop.run_until_complete
+    ???
+tests/probe_perf_findings.py:117: in scenario
+    assert bytes(await asyncio.wait_for(live, 0.5)) == b"only-message"
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/tasks.py:506: in wait_for
+    async with timeouts.timeout(timeout):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.13/3.13.14_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/timeouts.py:117: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+=========================== short test summary info ============================
+FAILED tests/probe_perf_findings.py::test_cancelled_receive_does_not_consume_next_message
+FAILED tests/probe_perf_findings.py::test_resume_honors_transport_repause - a...
+FAILED tests/probe_perf_findings.py::test_small_message_retention_under_one_megabyte
+FAILED tests/probe_perf_findings.py::test_reclaims_completed_large_receive_buffer
+FAILED tests/probe_perf_findings.py::test_cancelled_receive_on_real_connection[asyncio]
+FAILED tests/probe_perf_findings.py::test_cancelled_receive_on_real_connection[uvloop]
+6 failed in 1.17s

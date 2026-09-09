@@ -1,0 +1,27 @@
+   Compiling websocket_rs v0.7.11 (/Users/nyoder/.codex/worktrees/2a57/websocket-rs)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.46s
+     Running unittests src/lib.rs (target/debug/deps/websocket_rs-33a75621e03ab315)
+
+running 19 tests
+test native_client::tests::test_parse_header_fragmented_extended_ping_returns_header ... ok
+test native_client::tests::test_parse_header_incomplete_extended_lengths_returns_none ... ok
+test native_client::tests::test_parse_header_masked_server_frame_keeps_unmasked_header_size ... ok
+test native_client::tests::test_emit_protocol_events_fragment_ping_message_order_and_releases_borrow ... ok
+test native_client::tests::test_parse_header_rsv2_rsv3_and_reserved_opcode_returns_header ... ok
+test native_client::tests::test_protocol_core_continuation_without_fragment_emits_protocol_error ... ok
+test native_client::tests::test_protocol_core_fragments_over_message_cap_emit_1009 ... ok
+test native_client::tests::test_protocol_core_oversized_frame_emits_1009_before_buffering ... ok
+test native_client::tests::test_walk_frames_fragmented_frame_falls_back_without_visiting ... ok
+test native_client::tests::test_walk_frames_partial_payload_reports_post_compaction_threshold ... ok
+test native_client::tests::test_walk_frames_oversized_length_falls_back_without_visiting ... ok
+test native_client::tests::test_protocol_core_close_emits_code_and_reason ... ok
+test native_client::tests::test_walk_frames_complete_frames_visits_payloads ... ok
+test native_client::protocol::tests::test_build_handshake_ipv4_and_hostname_untouched ... ok
+test native_client::protocol::tests::test_build_handshake_ipv6_host_header_rebrackets_bare_literal ... ok
+test native_client::tests::test_parse_ws_uri_ipv6_with_port_and_query ... ok
+test native_client::tests::test_protocol_handshake_accepts_subprotocol_and_compression ... ok
+test native_client::tests::test_parse_ws_uri_uses_default_ports ... ok
+test native_client::tests::test_decompress_message_inflating_past_message_cap_emits_1009 ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.36s
+

@@ -1,0 +1,17 @@
+{
+  "uvloop": {
+    "returncode": 0,
+    "stdout": "{\"tls_cancel_3_connections_released\": \"pass\", \"tls_timeout_3_connections_released\": \"pass\", \"websocket_cancel_3_connections_released\": \"pass\", \"websocket_timeout_3_connections_released\": \"pass\", \"16_mib_burst_integrity_with_delayed_reader\": \"pass\", \"send_from_receive_callback\": \"pass\", \"trusted_certificate_wrong_hostname_rejected\": \"pass\"}\n",
+    "stderr": ""
+  },
+  "asyncio": {
+    "returncode": 0,
+    "stdout": "{\"tls_cancel_3_connections_released\": \"pass\", \"tls_timeout_3_connections_released\": \"pass\", \"websocket_cancel_3_connections_released\": \"pass\", \"websocket_timeout_3_connections_released\": \"pass\", \"16_mib_burst_integrity_with_delayed_reader\": \"pass\", \"send_from_receive_callback\": \"pass\", \"trusted_certificate_wrong_hostname_rejected\": \"pass\"}\n",
+    "stderr": ""
+  },
+  "tls_checks": {
+    "returncode": 0,
+    "stdout": "{\"fragmented_text\": \"pass\", \"protocol_pong\": \"pass\", \"ordered_32_message_burst\": \"pass\", \"untrusted_certificate_rejected\": \"pass\"}\n",
+    "stderr": ""
+  }
+}

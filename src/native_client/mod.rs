@@ -5,8 +5,9 @@
 //! in Rust with AVX2-friendly masking.
 //!
 //! Current scope:
-//! - ws:// plain TCP and wss:// TLS delegated to Python ssl; SOCKS5 via the
-//!   embedded connect helper
+//! - ws:// plain TCP; wss:// TLS through aiofastnet when installed, else the
+//!   stdlib ssl module, with an experimental same-thread rustls backend behind
+//!   the `rustls-transport` cargo feature; SOCKS5 via the embedded connect helper
 //! - Binary + Text messages, fragmented messages, permessage-deflate when
 //!   negotiated
 //! - Control frames: close, client ping, and server pings answered with a
@@ -18,6 +19,8 @@
 mod client;
 mod codec;
 mod protocol;
+#[cfg(feature = "rustls-transport")]
+mod rustls_transport;
 
 use self::client::{NativeClient, NativeClientBuffered, State, WSMessage};
 use self::protocol::{build_handshake, DeflateCtx};
@@ -35,11 +38,23 @@ use crate::DEFAULT_CONNECT_TIMEOUT;
 
 /// Connect to a ws:// or wss:// URI and return a NativeClient once the handshake completes.
 ///
-/// TLS is delegated to asyncio — we pass an ``ssl.SSLContext`` through to
-/// ``loop.create_connection``, so the protocol sees decrypted bytes. If a
-/// custom context is needed (self-signed, client cert), pass it via ``ssl_context``.
+/// TLS is delegated to the event loop — we pass an ``ssl.SSLContext`` through to
+/// ``create_connection``, so the protocol sees decrypted bytes. If a custom
+/// context is needed (self-signed, client cert), pass it via ``ssl_context``.
+///
+/// ``tls_backend`` selects which transport carries wss:// traffic and is ignored
+/// for ws://:
+/// - ``"auto"`` (default): aiofastnet when importable, otherwise asyncio. Never
+///   on Windows: aiofastnet needs ``loop.add_reader``, which the default
+///   ProactorEventLoop does not implement, so ``auto`` stays on asyncio there.
+/// - ``"asyncio"``: pin the stdlib ``loop.create_connection`` + SSLProtocol path.
+/// - ``"aiofastnet"``: require aiofastnet; error if it is not installed, and
+///   always error on Windows for the reason above.
+/// - ``"rustls"``: experimental, requires the ``rustls-transport`` cargo feature.
+///   Keeps TLS on this thread in Rust and takes ``rustls_ca_file`` in place of
+///   ``ssl_context``; client-certificate auth is not implemented.
 #[pyfunction]
-#[pyo3(signature = (uri, *, headers=None, subprotocols=None, ssl_context=None, connect_timeout=None, receive_timeout=None, proxy=None, compression=false, on_message=None))]
+#[pyo3(signature = (uri, *, headers=None, subprotocols=None, ssl_context=None, connect_timeout=None, receive_timeout=None, proxy=None, compression=false, on_message=None, tls_backend="auto", rustls_ca_file=None))]
 #[allow(clippy::too_many_arguments)]
 fn connect<'py>(
     py: Python<'py>,
@@ -52,9 +67,20 @@ fn connect<'py>(
     proxy: Option<String>,
     compression: bool,
     on_message: Option<Py<PyAny>>,
+    tls_backend: &str,
+    rustls_ca_file: Option<String>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let (scheme, host, port, path) = parse_ws_uri(&uri)?;
     let is_tls = scheme == "wss";
+    let use_rustls = resolve_tls_backend(tls_backend, is_tls, ssl_context.is_some())?;
+    // Keyed on the name, not on use_rustls: `tls_backend="rustls"` over ws://
+    // resolves to false, and rejecting the trust file there would blame the
+    // wrong argument.
+    if rustls_ca_file.is_some() && tls_backend != "rustls" {
+        return Err(PyValueError::new_err(
+            "rustls_ca_file requires tls_backend=\"rustls\"",
+        ));
+    }
     let headers = headers.unwrap_or_default();
     let subprotocols = subprotocols.unwrap_or_default();
     let (req_bytes, expected_accept) =
@@ -110,6 +136,25 @@ fn connect<'py>(
         Py::new(py, (NativeClientBuffered, client))?.into_any()
     };
 
+    // With rustls the object asyncio drives is the TLS shim; it decrypts and
+    // forwards plaintext into the NativeClient, which never sees the raw socket.
+    #[cfg(feature = "rustls-transport")]
+    let protocol_obj: Py<PyAny> = if use_rustls {
+        Py::new(
+            py,
+            rustls_transport::RustlsTransport::new(
+                client_obj.extract::<Py<NativeClient>>(py)?,
+                host.clone(),
+                rustls_ca_file,
+            )?,
+        )?
+        .into_any()
+    } else {
+        client_obj.clone_ref(py)
+    };
+    #[cfg(not(feature = "rustls-transport"))]
+    let protocol_obj: Py<PyAny> = client_obj.clone_ref(py);
+
     // Create the handshake future. Cache `loop.create_future` and
     // `asyncio.wait_for` bound methods so the recv/anext hot paths don't
     // need to re-resolve them.
@@ -128,7 +173,7 @@ fn connect<'py>(
 
     // Launch the low-level create_connection + post-connection handshake send as a task
     let protocol_factory = {
-        let client_clone = client_obj.clone_ref(py);
+        let client_clone = protocol_obj.clone_ref(py);
         pyo3::types::PyCFunction::new_closure(
             py,
             None,
@@ -140,7 +185,7 @@ fn connect<'py>(
     };
 
     // Resolve SSL context if wss:// (user-supplied overrides default).
-    let ssl_arg: Py<PyAny> = if is_tls {
+    let ssl_arg: Py<PyAny> = if is_tls && !use_rustls {
         match ssl_context {
             Some(ctx) => ctx,
             None => py
@@ -164,20 +209,67 @@ fn connect<'py>(
         Some(p) => p.into_pyobject(py)?.into_any().unbind(),
         None => py.None(),
     };
-    let ssl_obj: Py<PyAny> = if is_tls { ssl_arg } else { py.None() };
+    // What the helper should act on, which is not always what the caller asked
+    // for: over ws:// the rustls shim is never built, so telling the helper
+    // "rustls" there would make it write the handshake to a NativeClient that
+    // has no write(). Collapsing to "auto" is safe because the helper ignores
+    // the backend entirely for plain TCP.
+    let helper_backend = if tls_backend == "rustls" && !use_rustls {
+        "auto"
+    } else {
+        tls_backend
+    };
+    let ssl_obj: Py<PyAny> = if is_tls && !use_rustls {
+        ssl_arg
+    } else {
+        py.None()
+    };
     helper.call1((
         loop_,
         protocol_factory,
         host.clone(),
         port,
-        is_tls,
+        // rustls drives the handshake itself over a plain TCP transport.
+        is_tls && !use_rustls,
         ssl_obj,
         proxy_obj,
         req_bytes,
         handshake_fut,
         client_obj,
         timeout_obj,
+        helper_backend,
     ))
+}
+
+/// Validate ``tls_backend`` and report whether the same-thread rustls transport
+/// was requested. Backend selection between asyncio and aiofastnet happens in
+/// the Python connect helper, which is where ``create_connection`` lives; this
+/// only rejects unknown names and combinations that cannot work.
+fn resolve_tls_backend(tls_backend: &str, is_tls: bool, has_ssl_context: bool) -> PyResult<bool> {
+    match tls_backend {
+        "auto" | "asyncio" | "aiofastnet" => Ok(false),
+        "rustls" => {
+            if cfg!(not(feature = "rustls-transport")) {
+                return Err(PyValueError::new_err(
+                    "tls_backend=\"rustls\" needs a build with the `rustls-transport` \
+                     cargo feature enabled",
+                ));
+            }
+            // Silently ignoring an SSLContext would hide a misconfigured trust
+            // store, so reject the combination rather than pick one of them.
+            if is_tls && has_ssl_context {
+                return Err(PyValueError::new_err(
+                    "tls_backend=\"rustls\" does not accept ssl_context; use rustls_ca_file",
+                ));
+            }
+            // ws:// has no TLS layer to swap out, so the backend is inert there
+            // — the same leniency the other backends get.
+            Ok(is_tls)
+        }
+        other => Err(PyValueError::new_err(format!(
+            "tls_backend must be one of auto, asyncio, aiofastnet, rustls (got {other:?})"
+        ))),
+    }
 }
 
 fn parse_ws_uri(uri: &str) -> PyResult<(&'static str, String, u16, String)> {
@@ -225,6 +317,12 @@ fn get_connect_helper(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
         c"helper.py",
         c"helper",
     )?;
+    // Publish the module so the TLS backend selection it owns is reachable for
+    // tests and debugging. The name is private; nothing in the public API
+    // depends on it.
+    py.import("sys")?
+        .getattr("modules")?
+        .set_item("websocket_rs._native_connect_helper", &module)?;
     let helper = module.getattr("_connect_helper")?;
     let _ = CACHE.set(helper.clone().unbind());
     Ok(helper)
@@ -240,6 +338,10 @@ pub fn register_native_client(py: Python<'_>, parent: &Bound<'_, PyModule>) -> P
     // Also register in sys.modules so `from websocket_rs.native_client import ...` works.
     let sys_modules = py.import("sys")?.getattr("modules")?;
     sys_modules.set_item("websocket_rs.native_client", &m)?;
+    // Compile the connect helper now rather than on the first connect: it is a
+    // fixed include_str! of our own source, so nothing about it can fail later
+    // that would not fail here, and this keeps it off the connect path.
+    get_connect_helper(py)?;
     Ok(())
 }
 
@@ -252,11 +354,11 @@ mod tests {
     use super::codec::{
         parse_header, walk_frames, ScanOutcome, VisitOutcome, MAX_FRAME_SIZE, OP_BINARY, OP_PING,
     };
-    use super::parse_ws_uri;
     use super::protocol::{
         decompress_message, emit_protocol_events, EventFlow, HandshakeOutcome, ProtocolCore,
         ProtocolEvent,
     };
+    use super::{parse_ws_uri, resolve_tls_backend};
 
     struct CoreState {
         buf: BytesMut,
@@ -525,6 +627,48 @@ mod tests {
                 reason: Some(ref reason),
             } if reason == "bye"
         ));
+    }
+
+    #[test]
+    fn test_resolve_tls_backend_accepts_the_python_side_backends() {
+        // These three are all resolved in the connect helper, so none of them
+        // asks the Rust side for the rustls shim.
+        for name in ["auto", "asyncio", "aiofastnet"] {
+            assert!(!resolve_tls_backend(name, true, false).unwrap());
+            assert!(!resolve_tls_backend(name, false, false).unwrap());
+        }
+        // A user-supplied SSLContext is only meaningful to those backends, and
+        // must keep working with them.
+        assert!(!resolve_tls_backend("auto", true, true).unwrap());
+    }
+
+    #[test]
+    fn test_resolve_tls_backend_rejects_unknown_names() {
+        // The message itself is asserted from tests/test_tls_backends.py; these
+        // unit tests run without an initialised interpreter to read it.
+        assert!(resolve_tls_backend("openssl", true, false).is_err());
+        assert!(resolve_tls_backend("", true, false).is_err());
+        assert!(resolve_tls_backend("Auto", true, false).is_err());
+    }
+
+    #[test]
+    #[cfg(feature = "rustls-transport")]
+    fn test_resolve_tls_backend_rustls_needs_tls_and_no_ssl_context() {
+        assert!(resolve_tls_backend("rustls", true, false).unwrap());
+        // ws:// has no TLS layer to replace, so the backend is simply inert
+        // rather than an error - same leniency the other backends get.
+        assert!(!resolve_tls_backend("rustls", false, false).unwrap());
+        // Silently ignoring an SSLContext would hide a misconfigured trust store.
+        assert!(resolve_tls_backend("rustls", true, true).is_err());
+    }
+
+    #[test]
+    #[cfg(not(feature = "rustls-transport"))]
+    fn test_resolve_tls_backend_rustls_needs_the_feature() {
+        // Not compiled in: asking for it must fail loudly rather than quietly
+        // falling back to a different TLS stack than the caller asked for.
+        assert!(resolve_tls_backend("rustls", true, false).is_err());
+        assert!(resolve_tls_backend("rustls", false, false).is_err());
     }
 
     #[test]

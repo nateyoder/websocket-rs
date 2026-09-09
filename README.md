@@ -71,6 +71,8 @@ Sync wins TLS 256 B–100 KB by 30–60%. At 1 MB picows leads by ~7%; ws-rs tie
 
 📊 **[Full benchmarks — all 3 servers, TCP & TLS, latency distributions, compression](docs/BENCHMARKS.md)** | 📝 **[Optimization Research](docs/OPTIMIZATION_RESEARCH.md)**
 
+> **TLS throughput:** `wss://` automatically routes through [aiofastnet](https://pypi.org/project/aiofastnet/) when it is installed — **+13.1%** request throughput at 256 B [+10.86, +15.93] and **+11.7%** at 8 KiB [+10.90, +13.00] over asyncio's `SSLProtocol` (15 paired rounds, 15/15 wins). Install it with `pip install 'websocket-rs[fast-tls]'`; without it — and always on Windows, where aiofastnet's `loop.add_reader` I/O is unsupported — the stdlib path is used unchanged. See **[TLS backends](docs/TLS-BACKENDS.md)**.
+
 ## ✨ What's New in v0.7.3
 
 - **Faster sync client**: both directions of the synchronous client drop their per-message payload copy — large-message throughput up 7–28% (plain 1 MiB recv +9.1%, TLS 1 MiB recv +27.9%, plain 1 MiB send +7.2%; medians on an idle host).

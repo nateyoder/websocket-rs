@@ -1,0 +1,18 @@
+{
+  "commit": "a006d393bcf0601b553459dcd97e6592fb674187",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "architecture": "arm64",
+  "logical_cpus": 16,
+  "ram_bytes": 137438953472,
+  "python": "3.13.14",
+  "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+  "dependencies": "aiofastnet==1.1.0\nclick==8.5.0\ngranian==2.8.2\niniconfig==2.3.0\nmaturin==1.15.0\nmultidict==6.7.1\npackaging==26.3\npicows==2.1.3\npluggy==1.6.0\npsutil==7.2.2\npygments==2.21.0\npytest==9.1.1\npytest-asyncio==1.4.0\npython-socks==3.1.1\nruff==0.16.6\nuvloop==0.22.1\n-e file:///Users/nyoder/.codex/worktrees/2a57/websocket-rs\nwebsockets==17.1\n",
+  "binaries": {
+    "recv_reclaim.so": "228e21302d13366983ce0d8c03981190f66145e93ce810eb5b4784efcdf4538c",
+    "small_copy.so": "18f02c4bebad76a387a5b6cf109108604d6df32e2e7af82bc1f50e908e98a85a",
+    "main.so": "eec2ac69e04c107748d829367d8241c5ce805a71bb50a63ec0a94eef8225b2ba",
+    "compression_fast.so": "03041870b34b6cbe683091041962aa7926008c92c833251da14f0a8f182aca52",
+    "eagain_reuse.so": "c7374bce52afabcbdda49449633c1e1d10465cfb21f22b2833d1d06415dabfd3"
+  },
+  "published_comparison_picows": "2.1.1 (pinned after original audit; original audit environment had 2.1.3)"
+}

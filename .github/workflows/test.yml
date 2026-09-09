@@ -58,7 +58,9 @@ jobs:
         # uvloop has no Windows wheels; without it the uvloop half of the
         # peer-close matrix silently drops, and uvloop+wss is a combination
         # that actually regressed once.
-        run: uv pip install maturin pytest pytest-asyncio websockets "uvloop; sys_platform != 'win32'"
+        # aiofastnet is the transport wss:// defaults to when installed; the
+        # TLS backend tests skip its cells without it.
+        run: uv pip install maturin pytest pytest-asyncio websockets "uvloop; sys_platform != 'win32'" aiofastnet
 
       - name: Build
         run: uv run maturin develop --release
@@ -68,6 +70,10 @@ jobs:
 
       - name: Run clippy
         run: cargo clippy -- -D warnings
+
+      # The rustls transport is off by default, so nothing above compiles it.
+      - name: Run clippy (rustls-transport)
+        run: cargo clippy --features rustls-transport -- -D warnings
 
       # Unit tests link libpython (extension-module off); point the loader at
       # the interpreter's lib dir the same way pr.yml does.
@@ -79,6 +85,7 @@ jobs:
           # dyld ignores LD_LIBRARY_PATH; give macOS the same search path.
           export DYLD_FALLBACK_LIBRARY_PATH="$LD_LIBRARY_PATH"
           cargo test --lib --no-default-features
+          cargo test --lib --no-default-features --features rustls-transport
 
       - name: Run rustfmt
         run: cargo fmt -- --check

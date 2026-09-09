@@ -1,6 +1,8 @@
 
 import asyncio as _asyncio
 import socket as _socket
+import sys as _sys
+from functools import partial as _partial
 
 
 def _recv_exact(sock, size, stage):
@@ -76,9 +78,74 @@ def _parse_proxy_uri(proxy):
     return parts.hostname, parts.port, user, password
 
 
+# aiofastnet ships an OpenSSL-backed asyncio transport whose TLS path is
+# measurably faster than asyncio's SSLProtocol (see
+# docs/performance-audit/TLS-OPTIMIZATION.md). It is an optional dependency, so
+# resolution is memoised and a missing or broken install degrades to asyncio
+# rather than failing the connect.
+_AIOFASTNET_UNRESOLVED = object()
+_aiofastnet_create_connection = _AIOFASTNET_UNRESOLVED
+
+# aiofastnet registers its socket with ``loop.add_reader``, which the Windows
+# default event loop (ProactorEventLoop since 3.8) does not implement, so every
+# wss:// connect would raise NotImplementedError. The gate is deliberately the
+# whole platform rather than a probe of the running loop: Windows is untested
+# here, and a narrower rule is what produced the bug in the first place.
+_IS_WINDOWS = _sys.platform == "win32"
+
+
+def _resolve_aiofastnet():
+    """Return ``aiofastnet.create_connection``, or None when unavailable.
+
+    Imported once per process; the result (including the None) is cached so
+    the connect path never re-enters the import machinery.
+    """
+    global _aiofastnet_create_connection
+    if _aiofastnet_create_connection is _AIOFASTNET_UNRESOLVED:
+        try:
+            import aiofastnet
+            _aiofastnet_create_connection = aiofastnet.create_connection
+        except Exception:
+            _aiofastnet_create_connection = None
+    return _aiofastnet_create_connection
+
+
+def _select_create_connection(loop, is_tls, tls_backend):
+    """Pick the create_connection used for this connection.
+
+    Only wss:// is routed through aiofastnet: the plain-TCP path already runs
+    on asyncio's BufferedProtocol fast path, and the measured win is in the TLS
+    layer. "auto" prefers aiofastnet when importable, "aiofastnet" demands it,
+    "asyncio" pins the stdlib path. On Windows aiofastnet is never selected:
+    "auto" stays on asyncio and "aiofastnet" is an error.
+    """
+    if not is_tls or tls_backend == "asyncio":
+        return loop.create_connection
+    if _IS_WINDOWS:
+        if tls_backend == "aiofastnet":
+            raise RuntimeError(
+                'tls_backend="aiofastnet" is not supported on Windows: aiofastnet '
+                "drives its I/O through loop.add_reader, which the Windows default "
+                "ProactorEventLoop does not implement. Use tls_backend=\"auto\" or "
+                '"asyncio".'
+            )
+        return loop.create_connection
+    create_connection = _resolve_aiofastnet()
+    if create_connection is None:
+        if tls_backend == "aiofastnet":
+            raise RuntimeError(
+                'tls_backend="aiofastnet" requires the aiofastnet package: '
+                "pip install aiofastnet"
+            )
+        return loop.create_connection
+    return _partial(create_connection, loop)
+
+
 async def _connect_helper(loop, protocol_factory, host, port, is_tls, ssl_ctx,
-                          proxy, req_bytes, handshake_fut, client, connect_timeout):
+                          proxy, req_bytes, handshake_fut, client, connect_timeout,
+                          tls_backend="auto"):
     async def _do():
+        create_connection = _select_create_connection(loop, is_tls, tls_backend)
         kwargs = {}
         if is_tls:
             kwargs["ssl"] = ssl_ctx
@@ -92,9 +159,9 @@ async def _connect_helper(loop, protocol_factory, host, port, is_tls, ssl_ctx,
             # Hand the already-connected socket to asyncio. TLS (if any) runs
             # on top of it; asyncio will perform the TLS handshake itself.
             kwargs["sock"] = sock
-            transport, _proto = await loop.create_connection(protocol_factory, **kwargs)
+            transport, _proto = await create_connection(protocol_factory, **kwargs)
         else:
-            transport, _proto = await loop.create_connection(
+            transport, _proto = await create_connection(
                 protocol_factory, host, port, **kwargs
             )
             try:
@@ -103,6 +170,13 @@ async def _connect_helper(loop, protocol_factory, host, port, is_tls, ssl_ctx,
                     s.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_NODELAY, 1)
             except Exception:
                 pass
+        if tls_backend == "rustls":
+            # The TLS shim is the protocol asyncio drives; the upgrade request
+            # has to be written through it so it gets encrypted, not to the raw
+            # TCP transport underneath. connect() only passes "rustls" down when
+            # it actually built a shim, so this cannot fire on a plain ws://
+            # connection where _proto would be the NativeClient itself.
+            transport = _proto
         try:
             transport.write(bytes(req_bytes))
             await handshake_fut

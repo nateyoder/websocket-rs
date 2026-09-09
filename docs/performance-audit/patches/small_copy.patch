@@ -1,0 +1,14 @@
+diff --git a/src/native_client/client.rs b/src/native_client/client.rs
+index 08cd5df..a35cb9f 100644
+--- a/src/native_client/client.rs
++++ b/src/native_client/client.rs
+@@ -1244,6 +1244,9 @@ impl NativeClient {
+                 OP_TEXT | OP_BINARY => {
+                     let payload = match mode {
+                         PayloadMode::Copy => Bytes::copy_from_slice(frame.payload),
++                        PayloadMode::ZeroCopy { .. } if frame.payload.len() <= 1024 => {
++                            Bytes::copy_from_slice(frame.payload)
++                        }
+                         PayloadMode::ZeroCopy { pb } => {
+                             // PyBytes is immutable, so the pointer stays
+                             // valid as long as the PyBytesOwner refcount

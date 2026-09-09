@@ -1,0 +1,219 @@
+{
+  "small_copy_tls_256": {
+    "throughput": {
+      "rounds": 15,
+      "baseline_median_ns": 29928.1918,
+      "candidate_median_ns": 29442.5082,
+      "paired_speedup_pct": 1.4937229335341806,
+      "speedup_95ci_pct": [
+        -3.801951164188333,
+        4.275818452305402
+      ],
+      "wins": 9
+    },
+    "failures": {
+      "baseline": [],
+      "candidate": []
+    },
+    "baseline": {
+      "rps": 33413.31165887543,
+      "cpu_ns": 16254.6,
+      "p50_us": 24.458,
+      "p95_us": 56.625,
+      "p99_us": 98.75
+    },
+    "candidate": {
+      "rps": 33964.497630674006,
+      "cpu_ns": 15941.8,
+      "p50_us": 24.5,
+      "p95_us": 55.417,
+      "p99_us": 95.375
+    }
+  },
+  "small_copy_tls_64k": {
+    "throughput": {
+      "rounds": 15,
+      "baseline_median_ns": 54813.00000000001,
+      "candidate_median_ns": 52588.583000000006,
+      "paired_speedup_pct": 0.7721126620204188,
+      "speedup_95ci_pct": [
+        -0.04785340957058626,
+        2.8350142682343593
+      ],
+      "wins": 10
+    },
+    "failures": {
+      "baseline": [],
+      "candidate": []
+    },
+    "baseline": {
+      "rps": 18243.847262510717,
+      "cpu_ns": 53162.0,
+      "p50_us": 1629.812,
+      "p95_us": 2361.292,
+      "p99_us": 2605.542
+    },
+    "candidate": {
+      "rps": 19015.53422726754,
+      "cpu_ns": 51635.0,
+      "p50_us": 1620.125,
+      "p95_us": 2190.25,
+      "p99_us": 2377.084
+    }
+  },
+  "reclaim_plain_1m": {
+    "throughput": {
+      "rounds": 15,
+      "baseline_median_ns": 319789.7233333333,
+      "candidate_median_ns": 334641.38666666666,
+      "paired_speedup_pct": -0.7682353496560879,
+      "speedup_95ci_pct": [
+        -6.676016100944637,
+        7.395778025920663
+      ],
+      "wins": 7
+    },
+    "failures": {
+      "baseline": [],
+      "candidate": []
+    },
+    "baseline": {
+      "rps": 3127.0548333338666,
+      "cpu_ns": 213553.33333333334,
+      "p50_us": 312.646,
+      "p95_us": 480.542,
+      "p99_us": 654.666
+    },
+    "candidate": {
+      "rps": 2988.2735365189337,
+      "cpu_ns": 218603.33333333334,
+      "p50_us": 325.3545,
+      "p95_us": 469.5,
+      "p99_us": 625.083
+    }
+  },
+  "callback_plain_256": {
+    "throughput": {
+      "rounds": 15,
+      "baseline_median_ns": 5063.0833999999995,
+      "candidate_median_ns": 4728.6582,
+      "paired_speedup_pct": 0.043812045915125886,
+      "speedup_95ci_pct": [
+        -7.617382876182499,
+        17.205819922259423
+      ],
+      "wins": 8
+    },
+    "failures": {
+      "baseline": [],
+      "candidate": []
+    },
+    "baseline": {
+      "rps": 197508.10346122287,
+      "cpu_ns": 4979.2,
+      "p50_us": 170.2705,
+      "p95_us": 211.667,
+      "p99_us": 291.875
+    },
+    "candidate": {
+      "rps": 211476.48184848716,
+      "cpu_ns": 4471.8,
+      "p50_us": 156.479,
+      "p95_us": 248.375,
+      "p99_us": 321.125
+    }
+  },
+  "callback_plain_64k": {
+    "throughput": {
+      "rounds": 15,
+      "baseline_median_ns": 20780.583000000002,
+      "candidate_median_ns": 18892.667,
+      "paired_speedup_pct": 7.829312822800483,
+      "speedup_95ci_pct": [
+        2.22754540927792,
+        12.603989099112155
+      ],
+      "wins": 11
+    },
+    "failures": {
+      "baseline": [],
+      "candidate": []
+    },
+    "baseline": {
+      "rps": 48121.84528220406,
+      "cpu_ns": 20489.0,
+      "p50_us": 657.2915,
+      "p95_us": 891.166,
+      "p99_us": 1009.0
+    },
+    "candidate": {
+      "rps": 52930.58941863528,
+      "cpu_ns": 18504.0,
+      "p50_us": 604.667,
+      "p95_us": 820.333,
+      "p99_us": 996.792
+    }
+  },
+  "legacy_plain_256": {
+    "throughput": {
+      "rounds": 15,
+      "baseline_median_ns": 53215.6918,
+      "candidate_median_ns": 22582.066600000002,
+      "paired_speedup_pct": 131.84657067763936,
+      "speedup_95ci_pct": [
+        121.5856756800429,
+        144.22620026216055
+      ],
+      "wins": 15
+    },
+    "failures": {
+      "baseline": [],
+      "candidate": []
+    },
+    "baseline": {
+      "rps": 18791.449780607756,
+      "cpu_ns": 41325.8,
+      "p50_us": 47.375,
+      "p95_us": 81.917,
+      "p99_us": 138.667
+    },
+    "candidate": {
+      "rps": 44282.926700783,
+      "cpu_ns": 10317.2,
+      "p50_us": 19.4375,
+      "p95_us": 39.083,
+      "p99_us": 71.458
+    }
+  },
+  "legacy_plain_64k": {
+    "throughput": {
+      "rounds": 15,
+      "baseline_median_ns": 20686.5,
+      "candidate_median_ns": 20074.958000000002,
+      "paired_speedup_pct": 3.046292799217798,
+      "speedup_95ci_pct": [
+        1.7947789598156572,
+        6.761361329680948
+      ],
+      "wins": 12
+    },
+    "failures": {
+      "baseline": [],
+      "candidate": []
+    },
+    "baseline": {
+      "rps": 48340.7052908902,
+      "cpu_ns": 30980.0,
+      "p50_us": 634.75,
+      "p95_us": 1022.375,
+      "p99_us": 1193.208
+    },
+    "candidate": {
+      "rps": 49813.304715257684,
+      "cpu_ns": 19437.0,
+      "p50_us": 637.8955,
+      "p95_us": 874.959,
+      "p99_us": 1026.917
+    }
+  }
+}

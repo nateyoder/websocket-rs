@@ -1,0 +1,17 @@
+{
+  "main": {
+    "returncode": 0
+  },
+  "small_copy": {
+    "returncode": 0
+  },
+  "compression_fast": {
+    "returncode": 0
+  },
+  "eagain_reuse": {
+    "returncode": 0
+  },
+  "recv_reclaim": {
+    "returncode": 0
+  }
+}
