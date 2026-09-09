@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 0.7.11
 
+### Fixed
+
+- **A canceled `recv()` no longer swallows the next message.** `deliver_message`
+  popped exactly one waiter from `pending_recv` and handed the frame to it;
+  `set_future_result` skips a Future that already reports `done()`, so a
+  canceled waiter consumed the message and it was neither delivered nor queued.
+  Anything that cancels the parked Future reaches this -- an explicit
+  `cancel()`, `asyncio.wait_for` around `recv()`, or a `receive_timeout`
+  expiring -- so a client polling with a timeout lost exactly one message per
+  expiry, silently. Delivery now skips settled waiters and hands the frame to
+  the first live receiver, falling back to the backlog when none remain; a
+  Future whose `done()` probe raises is treated as settled, which errs toward
+  queueing the message rather than handing it to a receiver that may never
+  consume it.
+- **Canceled receive waiters no longer accumulate on an idle connection.**
+  Skipping settled waiters only reclaims them when a frame arrives, so a
+  connection polled with a timeout that receives nothing retained one Future per
+  expiry -- 5,000 of 5,000 in the regression test. Parking a receiver now sweeps
+  settled entries once the queue passes a threshold, which is then raised to
+  twice the surviving count so a genuinely large set of concurrent receivers is
+  not rescanned on every `recv()`.
+- Measured neutral on the receive hot path against the previous build: +0.47%
+  [-0.19, +2.12] at 256 B and -0.01% [-0.56, +0.22] at 8 KiB, 15 alternating
+  paired rounds of plain-TCP request/response, both intervals containing zero.
+  Covered by `tests/test_recv_cancellation.py`, which drives the client over a
+  stub transport so no case depends on timing or load.
+
 ### Added
 
 - **`wss://` now goes through aiofastnet when it is installed.** A new

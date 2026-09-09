@@ -65,6 +65,10 @@ impl PingCleanup {
     }
 }
 
+/// Smallest queue length that triggers a cancelled-receiver sweep. Below this
+/// the scan costs more than the entries it could reclaim.
+pub(crate) const RECV_SWEEP_MIN: usize = 32;
+
 fn shrink_pings(pings: &mut PingRegistry) {
     // Amortized reclamation after bursts; retain a small heartbeat-sized table.
     if pings.capacity() > 64 && pings.len() < pings.capacity() / 4 {
@@ -80,6 +84,10 @@ pub(crate) struct State {
     pub(crate) expected_accept: String,
     pub(crate) pending_pings: Option<Box<PingRegistry>>,
     pub(crate) pending_recv: VecDeque<Py<PyAny>>,
+    /// Queue length at which the next sweep for cancelled receivers runs.
+    /// Raised to twice the surviving count after each sweep so a genuinely
+    /// large set of concurrent receivers is not rescanned on every recv().
+    pub(crate) recv_sweep_at: usize,
     pub(crate) backlog: VecDeque<Py<WSMessage>>,
     /// Optional synchronous callback invoked after data_received finishes
     /// parsing — bypasses the Future/await round-trip. Frames are buffered in
@@ -185,6 +193,52 @@ impl State {
             shrink_pings(pings);
         }
         ping
+    }
+
+    /// Pop the first receiver that is still waiting, discarding any that were
+    /// cancelled or otherwise settled.
+    ///
+    /// Delivering to a done Future silently destroys the message: `set_result`
+    /// is skipped and the frame is neither queued nor handed on. A `recv()`
+    /// that timed out leaves exactly such a Future parked here, so without this
+    /// a timeout costs the caller the *next* message as well.
+    ///
+    /// A Future whose `done()` probe raises is treated as dead. That direction
+    /// is the safe one: the message falls through to the backlog instead of
+    /// being handed to a receiver that may never consume it.
+    fn take_live_receiver(&mut self, py: Python<'_>) -> Option<Py<PyAny>> {
+        while let Some(future) = self.pending_recv.pop_front() {
+            let done = future
+                .bind(py)
+                .call_method0(pyo3::intern!(py, "done"))
+                .and_then(|d| d.extract::<bool>())
+                .unwrap_or(true);
+            if !done {
+                return Some(future);
+            }
+        }
+        None
+    }
+
+    /// Park a receiver, first dropping cancelled ones if the queue has grown
+    /// past the sweep threshold.
+    ///
+    /// `take_live_receiver` only reclaims when a frame arrives. A connection
+    /// polled with a timeout that receives nothing would otherwise retain one
+    /// cancelled Future per expiry, unbounded. Sweeping costs one `done()` call
+    /// per parked entry, so it is amortized against the threshold rather than
+    /// run on every recv().
+    fn park_receiver(&mut self, py: Python<'_>, future: Py<PyAny>) {
+        if self.pending_recv.len() >= self.recv_sweep_at {
+            self.pending_recv.retain(|f| {
+                !f.bind(py)
+                    .call_method0(pyo3::intern!(py, "done"))
+                    .and_then(|d| d.extract::<bool>())
+                    .unwrap_or(true)
+            });
+            self.recv_sweep_at = RECV_SWEEP_MIN.max(self.pending_recv.len().saturating_mul(2));
+        }
+        self.pending_recv.push_back(future);
     }
 
     fn take_pending(&mut self) -> VecDeque<Py<PyAny>> {
@@ -891,8 +945,7 @@ impl NativeClient {
         let fut = create_future.bind(py).call0()?;
         self.state
             .borrow_mut()
-            .pending_recv
-            .push_back(fut.clone().unbind());
+            .park_receiver(py, fut.clone().unbind());
         if let (Some(t), Some(wait_for)) = (timeout, wait_for_cached) {
             return wait_for.bind(py).call1((fut, t));
         }
@@ -934,8 +987,7 @@ impl NativeClient {
         let fut = create_future.bind(py).call0()?;
         self.state
             .borrow_mut()
-            .pending_recv
-            .push_back(fut.clone().unbind());
+            .park_receiver(py, fut.clone().unbind());
         if let (Some(t), Some(wait_for)) = (timeout, wait_for_cached) {
             return wait_for.bind(py).call1((fut, t));
         }
@@ -1589,7 +1641,7 @@ impl NativeClient {
                     if state.on_message.is_some() {
                         state.pending_callback_msgs.push_back(message);
                         None
-                    } else if let Some(future) = state.pending_recv.pop_front() {
+                    } else if let Some(future) = state.take_live_receiver(py) {
                         Some((future, message))
                     } else {
                         state.backlog.push_back(message);
@@ -1706,7 +1758,7 @@ impl NativeClient {
             state.pending_callback_msgs.push_back(msg);
             return Ok(());
         }
-        if let Some(fut) = state.pending_recv.pop_front() {
+        if let Some(fut) = state.take_live_receiver(py) {
             Self::set_future_result(py, fut.bind(py), msg.into_any())?;
         } else {
             state.backlog.push_back(msg);

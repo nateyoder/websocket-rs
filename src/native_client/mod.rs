@@ -22,7 +22,7 @@ mod protocol;
 #[cfg(feature = "rustls-transport")]
 mod rustls_transport;
 
-use self::client::{NativeClient, NativeClientBuffered, State, WSMessage};
+use self::client::{NativeClient, NativeClientBuffered, State, WSMessage, RECV_SWEEP_MIN};
 use self::protocol::{build_handshake, DeflateCtx};
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -97,6 +97,7 @@ fn connect<'py>(
             expected_accept,
             pending_pings: Default::default(),
             pending_recv: VecDeque::new(),
+            recv_sweep_at: RECV_SWEEP_MIN,
             backlog: VecDeque::new(),
             on_message,
             pending_callback_msgs: VecDeque::new(),

@@ -34,10 +34,12 @@ DONE (with the closing PR) once merged.
   drives its own handshake over whatever transport it is given and that
   combination is untested.
 
-- [ ] F12: The audit's priority 1 and 2 findings are open: canceled receive
-  waiters retain memory and drop the next message, receive/write queues have no
-  byte-based backpressure, small messages pin whole input chunks, and there is
-  no compression level or per-message policy. See
+- [ ] F12: Audit priority 1 and 2 findings still open: receive/write queues have
+  no byte-based backpressure (1,024 x 64 KiB queues ~64 MiB per connection, and
+  `resume_writing` drains the whole queue despite a renewed pause), small
+  messages pin whole input chunks (2 KiB of payload retaining ~32 MiB), the
+  receive scratch buffer is grow-only, and there is no compression level or
+  per-message policy. The canceled-receive-waiter finding is fixed. See
   [REPORT.md](docs/performance-audit/REPORT.md).
 
 - [ ] F13: A server Ping was observed going unanswered while the client had a
