@@ -102,7 +102,7 @@ jobs:
       # upstream PyPI publish step was removed rather than left to fail on an
       # unset secret.
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           draft: false

@@ -93,29 +93,40 @@ Full details in [CHANGELOG.md](CHANGELOG.md).
 
 ### Installation
 
-```bash
-# Prebuilt wheel from the GitHub release (no Rust toolchain needed)
-uv pip install websocket-rs-nateyoder \
-  --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
-
-# Or with pip
-pip install websocket-rs-nateyoder \
-  --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
-
-# From source at a tag (platform-independent, builds Rust -- needs cargo)
-pip install git+https://github.com/nateyoder/websocket-rs@v0.7.10.post1
-```
-
 This fork is **not published to PyPI** -- the name `websocket-rs` there belongs
 to upstream. Releases are distributed as GitHub release assets: abi3 wheels for
-Linux x86_64/aarch64, macOS and Windows, plus an sdist. To declare it as a
-dependency of a `uv` project, pin the tag as a source:
+CPython 3.12+ on `manylinux_2_34` x86_64/aarch64, macOS arm64 and Windows
+x86-64, plus an sdist for anything else.
+
+**As a dependency of a `uv` project** -- this is the recommended form. `uv lock`
+records each platform's wheel URL, so no consumer needs a Rust toolchain and the
+lock is reproducible across platforms:
 
 ```toml
-dependencies = ["websocket-rs-nateyoder"]
+dependencies = ["websocket-rs-nateyoder==0.7.10.post1"]
 
-[tool.uv.sources]
-websocket-rs-nateyoder = { git = "https://github.com/nateyoder/websocket-rs", tag = "v0.7.10.post1" }
+[tool.uv]
+find-links = ["https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1"]
+```
+
+**Ad-hoc install:**
+
+```bash
+uv pip install "websocket-rs-nateyoder==0.7.10.post1" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+
+# Or with pip
+pip install "websocket-rs-nateyoder==0.7.10.post1" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+```
+
+Always pin the version. The tag in the `--find-links` URL selects which release
+is *offered*; it does not constrain what the resolver *picks*, because the
+default index stays enabled. Without `==0.7.10.post1` an unrelated project of the same
+name appearing on PyPI would silently win.
+
+**From source at a tag** (any platform, builds the extension -- needs `cargo`):
+
+```bash
+pip install git+https://github.com/nateyoder/websocket-rs@v0.7.10.post1
 ```
 
 ### Basic Usage
@@ -198,7 +209,7 @@ uv pip install https://github.com/nateyoder/websocket-rs/releases/download/v0.7.
 - Rust 1.80+ ([rustup.rs](https://rustup.rs/))
 
 ```bash
-git clone https://github.com/coseto6125/websocket-rs.git
+git clone https://github.com/nateyoder/websocket-rs.git
 cd websocket-rs
 pip install maturin
 maturin develop --release
@@ -206,10 +217,14 @@ maturin develop --release
 
 ### Using in pyproject.toml
 
+See [Installation](#installation) for the recommended `uv` form, which locks
+prebuilt wheels. To track the fork's `main` instead of a release -- building the
+extension on every install -- use a direct reference:
+
 ```toml
 [project]
 dependencies = [
-    "websocket-rs @ git+https://github.com/coseto6125/websocket-rs.git@main",
+    "websocket-rs-nateyoder @ git+https://github.com/nateyoder/websocket-rs.git@main",
 ]
 ```
 

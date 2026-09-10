@@ -8,7 +8,7 @@ Complete API reference for websocket-rs.
 ## Installation
 
 ```bash
-uv pip install websocket-rs-nateyoder --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+uv pip install "websocket-rs-nateyoder==0.7.10.post1" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
 ```
 
 ## Quick Start
@@ -535,6 +535,7 @@ See [README.md](README.md) for comprehensive benchmarks.
 
 ## Support
 
-- **GitHub**: https://github.com/coseto6125/websocket-rs
-- **Issues**: https://github.com/coseto6125/websocket-rs/issues
-- **PyPI**: https://pypi.org/project/websocket-rs/
+- **GitHub**: https://github.com/nateyoder/websocket-rs
+- **Issues**: https://github.com/nateyoder/websocket-rs/issues
+- **Releases**: https://github.com/nateyoder/websocket-rs/releases (this fork is not on PyPI)
+- **Upstream**: https://github.com/coseto6125/websocket-rs

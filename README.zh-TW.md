@@ -99,11 +99,12 @@ ws = await connect("wss://example.com/ws", headers={"Authorization": "Bearer tok
 ### 安裝
 
 ```bash
-# 從 PyPI 安裝（推薦）
-uv pip install websocket-rs-nateyoder --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+# 從 GitHub release 安裝預編譯 wheel（推薦，不需要 Rust 工具鏈）
+# 請務必鎖定版本：URL 中的 tag 只決定「提供」哪個 release，不會限制解析器的選擇。
+uv pip install "websocket-rs-nateyoder==0.7.10.post1" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
 
 # 使用 pip
-pip install websocket-rs-nateyoder --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+pip install "websocket-rs-nateyoder==0.7.10.post1" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
 
 # 從原始碼安裝（需要 cargo）
 pip install git+https://github.com/nateyoder/websocket-rs@v0.7.10.post1
@@ -216,7 +217,7 @@ uv pip install https://github.com/nateyoder/websocket-rs/releases/download/v0.7.
 - Rust 1.70+（[rustup.rs](https://rustup.rs/)）
 
 ```bash
-git clone https://github.com/coseto6125/websocket-rs.git
+git clone https://github.com/nateyoder/websocket-rs.git
 cd websocket-rs
 pip install maturin
 maturin develop --release
@@ -227,7 +228,7 @@ maturin develop --release
 ```toml
 [project]
 dependencies = [
-    "websocket-rs @ git+https://github.com/coseto6125/websocket-rs.git@main",
+    "websocket-rs-nateyoder @ git+https://github.com/nateyoder/websocket-rs.git@main",
 ]
 ```
 

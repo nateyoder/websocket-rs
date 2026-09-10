@@ -35,14 +35,14 @@ git commit -m "Initial commit: High-performance WebSocket client library for Pyt
 Connect to GitHub repository:
 
 ```bash
-git remote add origin https://github.com/coseto6125/websocket-rs.git
+git remote add origin https://github.com/nateyoder/websocket-rs.git
 git branch -M main
 git push -u origin main
 ```
 
 ## Step 4: Verify URLs
 
-All URLs in README.md and pyproject.toml have been updated with the correct username `coseto6125`.
+All URLs in README.md and pyproject.toml have been updated with the correct username `nateyoder`.
 
 ## Step 5: Create Release via Pull Request (Recommended)
 
@@ -113,7 +113,7 @@ gh release create v0.2.0 \
 
 ## Installation
 \`\`\`bash
-uv pip install git+https://github.com/coseto6125/websocket-rs.git@v0.2.0
+uv pip install git+https://github.com/nateyoder/websocket-rs.git@v0.2.0
 \`\`\`
 "
 ```
@@ -134,13 +134,13 @@ Once the release is created and wheels are uploaded, test the installation:
 
 ```bash
 # Test direct GitHub install
-uv pip install git+https://github.com/coseto6125/websocket-rs.git
+uv pip install git+https://github.com/nateyoder/websocket-rs.git
 
 # Test specific version
-uv pip install git+https://github.com/coseto6125/websocket-rs.git@v0.2.0
+uv pip install git+https://github.com/nateyoder/websocket-rs.git@v0.2.0
 
 # Test wheel download (adjust filename for your platform)
-uv pip install https://github.com/coseto6125/websocket-rs/releases/download/v0.2.0/websocket_rs-0.2.0-cp312-cp312-linux_x86_64.whl
+uv pip install https://github.com/nateyoder/websocket-rs/releases/download/v0.7.10.post1/websocket_rs_nateyoder-0.7.10.post1-cp312-abi3-manylinux_2_34_x86_64.whl
 ```
 
 ## Step 8: Enable GitHub Pages for Documentation (Optional)
@@ -154,8 +154,8 @@ uv pip install https://github.com/coseto6125/websocket-rs/releases/download/v0.2
 Add these badges at the top of your README:
 
 ```markdown
-[![Tests](https://github.com/coseto6125/websocket-rs/actions/workflows/test.yml/badge.svg)](https://github.com/coseto6125/websocket-rs/actions/workflows/test.yml)
-[![Release](https://github.com/coseto6125/websocket-rs/actions/workflows/release.yml/badge.svg)](https://github.com/coseto6125/websocket-rs/actions/workflows/release.yml)
+[![Tests](https://github.com/nateyoder/websocket-rs/actions/workflows/test.yml/badge.svg)](https://github.com/nateyoder/websocket-rs/actions/workflows/test.yml)
+[![Release](https://github.com/nateyoder/websocket-rs/actions/workflows/release.yml/badge.svg)](https://github.com/nateyoder/websocket-rs/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ```
 
@@ -172,24 +172,44 @@ For subsequent releases:
    ```
 4. GitHub Actions will automatically build and upload wheels
 
-## Publishing to PyPI (Future)
+## PyPI
 
-When ready to publish to PyPI:
+This fork is **not** published to PyPI and is not intended to be: the name
+`websocket-rs` there belongs to upstream, and the GitHub release assets are the
+distribution channel. The release workflow's PyPI upload step was removed
+deliberately -- do not restore it.
 
-1. Register on [PyPI](https://pypi.org/)
-2. Create API token
-3. Add PyPI token as GitHub secret: `PYPI_API_TOKEN`
-4. Update `.github/workflows/release.yml` to include PyPI upload:
+## Release checklist
 
-```yaml
-- name: Publish to PyPI
-  uses: PyO3/maturin-action@v1
-  env:
-    MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-  with:
-    command: upload
-    args: --skip-existing dist/*
-```
+Each release URL in the docs is pinned to a tag, so a new tag means updating
+them. Miss this and the install commands keep pointing at the previous release.
+
+1. Bump `version` in `pyproject.toml` to the next `<upstream base>.postN`. If
+   the base changes, bump `Cargo.toml` to the new base too --
+   `tests/test_version_metadata.py` enforces that they agree.
+2. Move the `## [Unreleased]` heading in `CHANGELOG.md` to the new version and
+   date it.
+3. Update the pinned version and tag in every install command. As of 0.7.10.post1 they
+   live in `README.md`, `README.zh-TW.md`, `README.pypi.md`, `docs/API.md` and
+   `docs/TLS-BACKENDS.md`; confirm with:
+   ```bash
+   grep -rn "expanded_assets\|releases/download" README*.md docs/
+   ```
+4. Merge, then tag the merge commit and push:
+   ```bash
+   git tag -a v<version> -m "v<version>" && git push origin v<version>
+   ```
+5. The `Release` workflow builds wheels for all four targets plus an sdist and
+   attaches them to a GitHub release. Verify the assets landed:
+   ```bash
+   gh release view v<version> --repo nateyoder/websocket-rs --json assets \
+     -q '.assets[].name'
+   ```
+6. Verify a clean install actually resolves from the release:
+   ```bash
+   uv pip install "websocket-rs-nateyoder==<version>" \
+     --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v<version>
+   ```
 
 ## Troubleshooting
 
