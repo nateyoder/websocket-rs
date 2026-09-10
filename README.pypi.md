@@ -19,7 +19,7 @@ High-performance WebSocket client implementation in Rust with Python bindings. P
 ## 📦 Installation
 
 ```bash
-uv pip install websocket-rs-nateyoder --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+uv pip install "websocket-rs-nateyoder==0.7.10.post1" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
 ```
 
 See the [repository README](https://github.com/nateyoder/websocket-rs#installation) for pinning it as a `uv` project dependency.
