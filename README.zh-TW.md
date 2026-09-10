@@ -1,7 +1,13 @@
 # WebSocket-RS 🚀
 
-[![Tests](https://github.com/coseto6125/websocket-rs/actions/workflows/test.yml/badge.svg)](https://github.com/coseto6125/websocket-rs/actions/workflows/test.yml)
-[![Release](https://github.com/coseto6125/websocket-rs/actions/workflows/release.yml/badge.svg)](https://github.com/coseto6125/websocket-rs/actions/workflows/release.yml)
+> **這是一個分支（fork）。** 它以 **`websocket-rs-nateyoder`** 的名稱發布到 PyPI，
+> 匯入名稱仍為 `websocket_rs`，因此可直接取代上游套件。上游為
+> [coseto6125/websocket-rs](https://github.com/coseto6125/websocket-rs)；
+> 本分支包含尚未於上游發布的變更。請只安裝其中一個 —
+> 兩者同時安裝會讓兩個發行套件佔用同一個匯入名稱。
+
+[![Tests](https://github.com/nateyoder/websocket-rs/actions/workflows/test.yml/badge.svg)](https://github.com/nateyoder/websocket-rs/actions/workflows/test.yml)
+[![Release](https://github.com/nateyoder/websocket-rs/actions/workflows/release.yml/badge.svg)](https://github.com/nateyoder/websocket-rs/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 [English](README.md) | [繁體中文](README.zh-TW.md)
@@ -93,16 +99,16 @@ ws = await connect("wss://example.com/ws", headers={"Authorization": "Bearer tok
 
 ```bash
 # 從 PyPI 安裝（推薦）
-pip install websocket-rs
+pip install websocket-rs-nateyoder
 
 # 使用 uv
-uv pip install websocket-rs
+uv pip install websocket-rs-nateyoder
 
 # 從原始碼安裝
-pip install git+https://github.com/coseto6125/websocket-rs.git
+pip install git+https://github.com/nateyoder/websocket-rs.git
 
 # 使用 pip
-pip install git+https://github.com/coseto6125/websocket-rs.git
+pip install git+https://github.com/nateyoder/websocket-rs.git
 ```
 
 ### 基本用法
@@ -202,7 +208,7 @@ connect(
 
 ```bash
 # 指定版本（範例為 Linux x86_64, Python 3.12+）
-uv pip install https://github.com/coseto6125/websocket-rs/releases/download/v0.5.0/websocket_rs-0.5.0-cp312-abi3-manylinux_2_34_x86_64.whl
+uv pip install https://github.com/nateyoder/websocket-rs/releases/download/v0.7.10.post1/websocket_rs_nateyoder-0.7.10.post1-cp312-abi3-manylinux_2_34_x86_64.whl
 ```
 
 ### 從原始碼編譯
