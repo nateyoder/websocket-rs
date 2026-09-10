@@ -95,6 +95,12 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # This fork is not published to PyPI -- the name `websocket-rs` belongs to
+      # upstream and we do not maintain a PyPI project of our own. The release
+      # assets ARE the distribution channel: the attached wheels and sdist are
+      # what consumers install from (see "Installation" in README.md). The
+      # upstream PyPI publish step was removed rather than left to fail on an
+      # unset secret.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -102,9 +108,3 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_TOKEN }}
-          skip-existing: true

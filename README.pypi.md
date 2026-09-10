@@ -1,8 +1,9 @@
 # WebSocket-RS 🚀
 
 > **This is a fork** of [coseto6125/websocket-rs](https://github.com/coseto6125/websocket-rs),
-> published as `websocket-rs-nateyoder` and importing as `websocket_rs`. It is a
-> drop-in replacement carrying changes not yet released upstream. Depend on
+> distributed as `websocket-rs-nateyoder` via [GitHub releases](https://github.com/nateyoder/websocket-rs/releases)
+> -- not PyPI -- and importing as `websocket_rs`. It is a drop-in replacement
+> carrying changes not yet released upstream. Depend on
 > exactly one of the two: installing both puts two distributions in the same
 > import name and you get whichever landed last.
 
@@ -18,8 +19,10 @@ High-performance WebSocket client implementation in Rust with Python bindings. P
 ## 📦 Installation
 
 ```bash
-pip install websocket-rs-nateyoder
+uv pip install websocket-rs-nateyoder --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
 ```
+
+See the [repository README](https://github.com/nateyoder/websocket-rs#installation) for pinning it as a `uv` project dependency.
 
 ## 🚀 Quick Start
 
