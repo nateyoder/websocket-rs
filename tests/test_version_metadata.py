@@ -48,7 +48,7 @@ def test_distribution_name_is_the_fork_name():
     # __init__.py looks this exact name up in the installed metadata; a rename
     # that missed it would send every install down the fallback path.
     assert _load("pyproject.toml")["project"]["name"] == "websocket-rs-nateyoder"
-    source = (_ROOT / "websocket_rs" / "__init__.py").read_text()
+    source = (_ROOT / "websocket_rs" / "__init__.py").read_text(encoding="utf-8")
     assert '_dist_version("websocket-rs-nateyoder")' in source
 
 
@@ -77,7 +77,10 @@ _PINNED_REQUIREMENT = re.compile(r"websocket-rs-nateyoder(?:\[[\w,-]+\])?==(?P<v
 
 def _doc_sources():
     for name in _DOC_FILES:
-        yield name, (_ROOT / name).read_text()
+        # Explicit encoding: README.zh-TW.md is UTF-8 with CJK text, and
+        # read_text() would otherwise decode it with the locale default --
+        # cp1252 on the Windows runners, which raises UnicodeDecodeError.
+        yield name, (_ROOT / name).read_text(encoding="utf-8")
 
 
 def test_release_urls_in_docs_point_at_the_current_version():
