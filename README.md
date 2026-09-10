@@ -1,6 +1,7 @@
 # WebSocket-RS 🚀
 
-> **This is a fork.** It is published to PyPI as **`websocket-rs-nateyoder`** and
+> **This is a fork.** It is distributed as **`websocket-rs-nateyoder`** via
+> [GitHub releases](https://github.com/nateyoder/websocket-rs/releases) -- not PyPI -- and
 > imports as `websocket_rs`, so it is a drop-in replacement for the upstream
 > package. Upstream is [coseto6125/websocket-rs](https://github.com/coseto6125/websocket-rs);
 > the fork carries changes not yet released there. Depend on exactly one of the
@@ -78,7 +79,7 @@ Sync wins TLS 256 B–100 KB by 30–60%. At 1 MB picows leads by ~7%; ws-rs tie
 
 📊 **[Full benchmarks — all 3 servers, TCP & TLS, latency distributions, compression](docs/BENCHMARKS.md)** | 📝 **[Optimization Research](docs/OPTIMIZATION_RESEARCH.md)**
 
-> **TLS throughput:** `wss://` automatically routes through [aiofastnet](https://pypi.org/project/aiofastnet/) when it is installed — **+13.1%** request throughput at 256 B [+10.86, +15.93] and **+11.7%** at 8 KiB [+10.90, +13.00] over asyncio's `SSLProtocol` (15 paired rounds, 15/15 wins). Install it with `pip install 'websocket-rs-nateyoder[fast-tls]'`; without it — and always on Windows, where aiofastnet's `loop.add_reader` I/O is unsupported — the stdlib path is used unchanged. See **[TLS backends](docs/TLS-BACKENDS.md)**.
+> **TLS throughput:** `wss://` automatically routes through [aiofastnet](https://pypi.org/project/aiofastnet/) when it is installed — **+13.1%** request throughput at 256 B [+10.86, +15.93] and **+11.7%** at 8 KiB [+10.90, +13.00] over asyncio's `SSLProtocol` (15 paired rounds, 15/15 wins). Install it with the `fast-tls` extra (`websocket-rs-nateyoder[fast-tls]`); without it — and always on Windows, where aiofastnet's `loop.add_reader` I/O is unsupported — the stdlib path is used unchanged. See **[TLS backends](docs/TLS-BACKENDS.md)**.
 
 ## ✨ What's New in v0.7.3
 
@@ -93,14 +94,28 @@ Full details in [CHANGELOG.md](CHANGELOG.md).
 ### Installation
 
 ```bash
-# From PyPI (recommended)
-pip install websocket-rs-nateyoder
+# Prebuilt wheel from the GitHub release (no Rust toolchain needed)
+uv pip install websocket-rs-nateyoder \
+  --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
 
-# Using uv
-uv pip install websocket-rs-nateyoder
+# Or with pip
+pip install websocket-rs-nateyoder \
+  --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
 
-# From source
-pip install git+https://github.com/nateyoder/websocket-rs.git
+# From source at a tag (platform-independent, builds Rust -- needs cargo)
+pip install git+https://github.com/nateyoder/websocket-rs@v0.7.10.post1
+```
+
+This fork is **not published to PyPI** -- the name `websocket-rs` there belongs
+to upstream. Releases are distributed as GitHub release assets: abi3 wheels for
+Linux x86_64/aarch64, macOS and Windows, plus an sdist. To declare it as a
+dependency of a `uv` project, pin the tag as a source:
+
+```toml
+dependencies = ["websocket-rs-nateyoder"]
+
+[tool.uv.sources]
+websocket-rs-nateyoder = { git = "https://github.com/nateyoder/websocket-rs", tag = "v0.7.10.post1" }
 ```
 
 ### Basic Usage

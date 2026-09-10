@@ -1,6 +1,7 @@
 # WebSocket-RS 🚀
 
-> **這是一個分支（fork）。** 它以 **`websocket-rs-nateyoder`** 的名稱發布到 PyPI，
+> **這是一個分支（fork）。** 它以 **`websocket-rs-nateyoder`** 的名稱透過
+> [GitHub releases](https://github.com/nateyoder/websocket-rs/releases) 發布（並非 PyPI），
 > 匯入名稱仍為 `websocket_rs`，因此可直接取代上游套件。上游為
 > [coseto6125/websocket-rs](https://github.com/coseto6125/websocket-rs)；
 > 本分支包含尚未於上游發布的變更。請只安裝其中一個 —
@@ -99,16 +100,13 @@ ws = await connect("wss://example.com/ws", headers={"Authorization": "Bearer tok
 
 ```bash
 # 從 PyPI 安裝（推薦）
-pip install websocket-rs-nateyoder
-
-# 使用 uv
-uv pip install websocket-rs-nateyoder
-
-# 從原始碼安裝
-pip install git+https://github.com/nateyoder/websocket-rs.git
+uv pip install websocket-rs-nateyoder --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
 
 # 使用 pip
-pip install git+https://github.com/nateyoder/websocket-rs.git
+pip install websocket-rs-nateyoder --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+
+# 從原始碼安裝（需要 cargo）
+pip install git+https://github.com/nateyoder/websocket-rs@v0.7.10.post1
 ```
 
 ### 基本用法
