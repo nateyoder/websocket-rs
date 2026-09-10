@@ -1,6 +1,10 @@
 [package]
 name = "websocket_rs"
-version = "0.7.11"
+# Tracks the upstream websocket-rs release this fork is based on. Cargo requires
+# semver, which cannot express the fork's ".postN" patch level, so the released
+# version lives in pyproject.toml and __version__ reads it from the installed
+# distribution metadata (see websocket_rs/__init__.py).
+version = "0.7.10"
 edition = "2021"
 authors = ["coseto6125 <enorenor@gmail.com>"]
 description = "High-performance WebSocket client library for Python using Rust"

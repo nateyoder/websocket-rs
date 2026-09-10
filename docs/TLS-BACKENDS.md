@@ -43,7 +43,7 @@ sessions.
 ## Installing it
 
 ```bash
-pip install 'websocket-rs[fast-tls]'
+pip install 'websocket-rs-nateyoder[fast-tls]'
 ```
 
 aiofastnet is an *optional* dependency. With `tls_backend="auto"` a missing (or
