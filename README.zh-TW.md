@@ -101,13 +101,13 @@ ws = await connect("wss://example.com/ws", headers={"Authorization": "Bearer tok
 ```bash
 # 從 GitHub release 安裝預編譯 wheel（推薦，不需要 Rust 工具鏈）
 # 請務必鎖定版本：URL 中的 tag 只決定「提供」哪個 release，不會限制解析器的選擇。
-uv pip install "websocket-rs-nateyoder==0.7.10.post1" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+uv pip install "websocket-rs-nateyoder==0.7.10.post2" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post2
 
 # 使用 pip
-pip install "websocket-rs-nateyoder==0.7.10.post1" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+pip install "websocket-rs-nateyoder==0.7.10.post2" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post2
 
 # 從原始碼安裝（需要 cargo）
-pip install git+https://github.com/nateyoder/websocket-rs@v0.7.10.post1
+pip install git+https://github.com/nateyoder/websocket-rs@v0.7.10.post2
 ```
 
 ### 基本用法
@@ -207,7 +207,7 @@ connect(
 
 ```bash
 # 指定版本（範例為 Linux x86_64, Python 3.12+）
-uv pip install https://github.com/nateyoder/websocket-rs/releases/download/v0.7.10.post1/websocket_rs_nateyoder-0.7.10.post1-cp312-abi3-manylinux_2_34_x86_64.whl
+uv pip install https://github.com/nateyoder/websocket-rs/releases/download/v0.7.10.post2/websocket_rs_nateyoder-0.7.10.post2-cp312-abi3-manylinux_2_34_x86_64.whl
 ```
 
 ### 從原始碼編譯

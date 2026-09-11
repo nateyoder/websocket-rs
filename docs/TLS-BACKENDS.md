@@ -9,7 +9,7 @@ uses asyncio's `BufferedProtocol` path.
 | `"auto"` (default) | aiofastnet when importable, otherwise asyncio | always |
 | `"asyncio"` | `loop.create_connection` + `ssl.SSLProtocol` | always |
 | `"aiofastnet"` | aiofastnet, or `RuntimeError` if not installed | needs `aiofastnet` |
-| `"rustls"` | same-thread rustls, TLS terminated in Rust | needs a build with the `rustls-transport` cargo feature |
+| `"rustls"` | same-thread rustls, TLS terminated in Rust | in the published wheels from 0.7.10.post2; bare `cargo` builds need `--features rustls-transport` |
 
 ## Why `auto` prefers aiofastnet
 
@@ -43,7 +43,7 @@ sessions.
 ## Installing it
 
 ```bash
-uv pip install "websocket-rs-nateyoder[fast-tls]==0.7.10.post1" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+uv pip install "websocket-rs-nateyoder[fast-tls]==0.7.10.post2" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post2
 ```
 
 aiofastnet is an *optional* dependency. With `tls_backend="auto"` a missing (or
@@ -79,15 +79,40 @@ ws = await websocket_rs.connect("wss://internal.example/ws", ssl_context=ctx)
 silently ignoring your trust settings. Use `rustls_ca_file=` (a PEM bundle), or
 omit it to use the platform's native roots.
 
-## The experimental rustls backend
+## The rustls backend
 
 `tls_backend="rustls"` keeps TLS on the asyncio event-loop thread and terminates
 it in Rust, feeding decrypted buffers straight into the Rust WebSocket parser —
 no Tokio tasks, no cross-thread handoff, no Python plaintext buffers. It is the
 first step toward doing TLS and WebSocket framing in one Rust package.
 
-**It is off by default because it is not yet a win overall.** Measured against
-`tls_backend="auto"` in the shipped build, same harness and 15 paired rounds:
+It is compiled into the published wheels but is not what `"auto"` selects: which
+backend is fastest depends on the workload, so it is opt-in.
+
+### Streaming small frames: fastest measured
+
+Measured in the pmkt-clients market-data recorder (`scripts/recorder_bench/` there):
+real captured Kalshi and Kraken traffic (median frame ~150-185 B) replayed over
+`wss://` into the production recorder, Linux arm64, 8 paired rounds, CPU per frame
+and end-to-end receive latency (server send to `recv` return, one shared clock).
+
+| Against | Kalshi perp CPU/frame | Kraken spot CPU/frame |
+|---|---|---|
+| stdlib `ssl.SSLProtocol` | **−14.6%** [−18.6, −4.6], 7/8 | **−12.9%** [−18.9, −9.6], 8/8 |
+| aiofastnet | −7.1% [−14.3, +1.2], 6/8 | −2.5% [−14.5, +0.1], 6/8 |
+| aiofastnet, both on uvloop | −11.1% [−12.9, +3.2], 6/8 | −8.1% [−11.7, +0.5], 5/8; p99 latency **−18.7%** [−27.1, −4.6] |
+
+rustls beats the stdlib clearly and aiofastnet on every median, though most of the
+aiofastnet intervals touch zero at 8 rounds. On uvloop it was the lowest-CPU and
+lowest-p50-latency configuration on both feeds. A paired live run against the real
+venues — Kalshi's authenticated handshake included, trust roots from the OS store —
+recorded 60,555 and 19,893 frames with zero disconnects and passed the recorder's
+full validation.
+
+### Request-response: trails aiofastnet at 8 KiB
+
+Measured against `tls_backend="auto"` (aiofastnet) in the shipped build, same
+harness and 15 paired rounds:
 
 | Payload | auto median req/s | rustls median req/s | Paired change (95% CI) | rustls wins |
 |---|---:|---:|---|---:|

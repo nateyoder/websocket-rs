@@ -103,30 +103,30 @@ records each platform's wheel URL, so no consumer needs a Rust toolchain and the
 lock is reproducible across platforms:
 
 ```toml
-dependencies = ["websocket-rs-nateyoder==0.7.10.post1"]
+dependencies = ["websocket-rs-nateyoder==0.7.10.post2"]
 
 [tool.uv]
-find-links = ["https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1"]
+find-links = ["https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post2"]
 ```
 
 **Ad-hoc install:**
 
 ```bash
-uv pip install "websocket-rs-nateyoder==0.7.10.post1" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+uv pip install "websocket-rs-nateyoder==0.7.10.post2" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post2
 
 # Or with pip
-pip install "websocket-rs-nateyoder==0.7.10.post1" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+pip install "websocket-rs-nateyoder==0.7.10.post2" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post2
 ```
 
 Always pin the version. The tag in the `--find-links` URL selects which release
 is *offered*; it does not constrain what the resolver *picks*, because the
-default index stays enabled. Without `==0.7.10.post1` an unrelated project of the same
+default index stays enabled. Without `==0.7.10.post2` an unrelated project of the same
 name appearing on PyPI would silently win.
 
 **From source at a tag** (any platform, builds the extension -- needs `cargo`):
 
 ```bash
-pip install git+https://github.com/nateyoder/websocket-rs@v0.7.10.post1
+pip install git+https://github.com/nateyoder/websocket-rs@v0.7.10.post2
 ```
 
 ### Basic Usage
@@ -199,7 +199,7 @@ which waits indefinitely for each receive operation.
 
 ```bash
 # Specify version (example for Linux x86_64, Python 3.12+)
-uv pip install https://github.com/nateyoder/websocket-rs/releases/download/v0.7.10.post1/websocket_rs_nateyoder-0.7.10.post1-cp312-abi3-manylinux_2_34_x86_64.whl
+uv pip install https://github.com/nateyoder/websocket-rs/releases/download/v0.7.10.post2/websocket_rs_nateyoder-0.7.10.post2-cp312-abi3-manylinux_2_34_x86_64.whl
 ```
 
 ### From Source

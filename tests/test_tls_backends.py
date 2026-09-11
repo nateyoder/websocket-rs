@@ -298,6 +298,13 @@ def test_rustls_ca_file_requires_the_rustls_backend():
         connect("wss://127.0.0.1:1/", rustls_ca_file="/nonexistent.pem")
 
 
+def test_the_published_build_includes_rustls():
+    """pyproject enables rustls-transport for every maturin build, and downstream code
+    pins tls_backend="rustls". A build without it must fail here, not quietly skip the
+    rustls cells below."""
+    assert _rustls_available()
+
+
 @pytest.mark.skipif(not _rustls_available(), reason="built without the rustls-transport feature")
 def test_rustls_rejects_an_ssl_context():
     with pytest.raises(ValueError, match="ssl_context"):

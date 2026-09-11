@@ -140,7 +140,7 @@ uv pip install git+https://github.com/nateyoder/websocket-rs.git
 uv pip install git+https://github.com/nateyoder/websocket-rs.git@v0.2.0
 
 # Test wheel download (adjust filename for your platform)
-uv pip install https://github.com/nateyoder/websocket-rs/releases/download/v0.7.10.post1/websocket_rs_nateyoder-0.7.10.post1-cp312-abi3-manylinux_2_34_x86_64.whl
+uv pip install https://github.com/nateyoder/websocket-rs/releases/download/v0.7.10.post2/websocket_rs_nateyoder-0.7.10.post2-cp312-abi3-manylinux_2_34_x86_64.whl
 ```
 
 ## Step 8: Enable GitHub Pages for Documentation (Optional)
@@ -189,7 +189,7 @@ them. Miss this and the install commands keep pointing at the previous release.
    `tests/test_version_metadata.py` enforces that they agree.
 2. Move the `## [Unreleased]` heading in `CHANGELOG.md` to the new version and
    date it.
-3. Update the pinned version and tag in every install command. As of 0.7.10.post1 they
+3. Update the pinned version and tag in every install command. As of 0.7.10.post2 they
    live in `README.md`, `README.zh-TW.md`, `README.pypi.md`, `docs/API.md` and
    `docs/TLS-BACKENDS.md`; confirm with:
    ```bash
