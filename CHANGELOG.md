@@ -19,6 +19,18 @@ identifies the fork; the import name stays `websocket_rs`.
 tracks only the upstream base, since Cargo requires semver and semver cannot
 express `.postN`.
 
+## [0.7.10.post2] - 2026-09-11
+
+### Changed
+
+- **The rustls TLS backend ships in the published wheels.** `tls_backend="rustls"`
+  no longer needs a custom build: the `rustls-transport` feature is enabled through
+  `[tool.maturin] features`. `"auto"` is unchanged -- it still prefers aiofastnet --
+  so nothing switches backend without asking for it. Measured in the pmkt-clients
+  recorder streaming real Kalshi and Kraken traffic, rustls was the fastest backend
+  on both feeds (12.9-14.6% less CPU per frame than stdlib TLS, significant; ahead of
+  aiofastnet on every median). Figures and intervals are in `docs/TLS-BACKENDS.md`.
+
 ## [0.7.10.post1] - 2026-09-09
 
 First release of this fork. Everything below is on top of upstream 0.7.10.

@@ -8,7 +8,7 @@ Complete API reference for websocket-rs.
 ## Installation
 
 ```bash
-uv pip install "websocket-rs-nateyoder==0.7.10.post1" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post1
+uv pip install "websocket-rs-nateyoder==0.7.10.post2" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post2
 ```
 
 ## Quick Start

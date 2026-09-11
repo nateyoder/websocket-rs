@@ -100,13 +100,6 @@ jobs:
       - name: Run tests
         run: pytest tests/
 
-      # Rebuild with the experimental TLS backend so its end-to-end cells in
-      # tests/test_tls_backends.py stop being skipped.
-      - name: Build with rustls-transport
-        run: maturin develop --release --features rustls-transport
-
-      - name: Run TLS backend tests (rustls-transport)
-        run: pytest tests/test_tls_backends.py
 
   build:
     name: Build wheels

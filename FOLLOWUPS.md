@@ -12,8 +12,9 @@ DONE (with the closing PR) once merged.
 
 - [ ] F9: The rustls transport wins at 256 B (+6.02% [+5.77, +7.68], 14/15
   rounds) and loses at 8 KiB (−2.71% [−2.92, −2.05]) against
-  `tls_backend="auto"`, which is what keeps it behind the `rustls-transport`
-  feature. Lower per-message overhead, higher per-byte cost. Figures are
+  `tls_backend="auto"`, which is why `"auto"` does not select it. (It ships in
+  the published wheels from 0.7.10.post2, where it is the fastest backend for
+  streaming small frames; see docs/TLS-BACKENDS.md.) Lower per-message overhead, higher per-byte cost. Figures are
   post-PR #7, which removed the per-message memset in the plaintext read
   (previously +5.80% / −3.30%); a re-measurement at 9 rounds reproduced the
   signs with intervals too wide to confirm the point estimates, and the host is
