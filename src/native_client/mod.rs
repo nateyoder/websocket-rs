@@ -6,8 +6,8 @@
 //!
 //! Current scope:
 //! - ws:// plain TCP; wss:// TLS through aiofastnet when installed, else the
-//!   stdlib ssl module, with an experimental same-thread rustls backend behind
-//!   the `rustls-transport` cargo feature; SOCKS5 via the embedded connect helper
+//!   stdlib ssl module, or a same-thread rustls backend (`rustls-transport`
+//!   feature, enabled in the published wheels); SOCKS5 via the embedded connect helper
 //! - Binary + Text messages, fragmented messages, permessage-deflate when
 //!   negotiated
 //! - Control frames: close, client ping, and server pings answered with a
@@ -52,7 +52,8 @@ use crate::DEFAULT_CONNECT_TIMEOUT;
 /// - ``"asyncio"``: pin the stdlib ``loop.create_connection`` + SSLProtocol path.
 /// - ``"aiofastnet"``: require aiofastnet; error if it is not installed, and
 ///   always error on Windows for the reason above.
-/// - ``"rustls"``: experimental, requires the ``rustls-transport`` cargo feature.
+/// - ``"rustls"``: requires the ``rustls-transport`` feature, which the published
+///   wheels enable.
 ///   Keeps TLS on this thread in Rust and takes ``rustls_ca_file`` in place of
 ///   ``ssl_context``; client-certificate auth is not implemented.
 ///

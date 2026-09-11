@@ -75,3 +75,22 @@ def test_non_windows_keeps_the_aiofastnet_path(helper, loop):
     finally:
         helper._aiofastnet_create_connection = saved_cc
         helper._IS_WINDOWS = saved
+
+
+def test_the_published_build_includes_rustls():
+    """pyproject enables rustls-transport for every maturin build and downstream code
+    pins tls_backend="rustls", so a build without it must fail CI on every platform.
+
+    It lives here rather than in tests/test_tls_backends.py because that module is
+    skipped on Windows, and a Windows wheel missing the feature would pass unnoticed.
+    Argument validation runs before connect touches an event loop, so this opens no
+    socket: without the feature connect raises ValueError naming it.
+    """
+    from websocket_rs.native_client import connect
+
+    try:
+        connect("wss://127.0.0.1:1/", tls_backend="rustls")
+    except ValueError as exc:
+        assert "cargo feature" not in str(exc), str(exc)
+    except Exception:
+        pass

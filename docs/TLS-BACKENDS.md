@@ -9,7 +9,7 @@ uses asyncio's `BufferedProtocol` path.
 | `"auto"` (default) | aiofastnet when importable, otherwise asyncio | always |
 | `"asyncio"` | `loop.create_connection` + `ssl.SSLProtocol` | always |
 | `"aiofastnet"` | aiofastnet, or `RuntimeError` if not installed | needs `aiofastnet` |
-| `"rustls"` | same-thread rustls, TLS terminated in Rust | in the published wheels from 0.7.10.post2; bare `cargo` builds need `--features rustls-transport` |
+| `"rustls"` | same-thread rustls, TLS terminated in Rust | in the published wheels from 0.7.10.post2; bare `cargo` builds need `--features rustls-transport`. Tested end to end on Linux and macOS; the Windows wheel includes it, but CI does not exercise a Windows rustls connection |
 
 ## Why `auto` prefers aiofastnet
 

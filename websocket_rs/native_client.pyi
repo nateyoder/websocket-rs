@@ -165,9 +165,9 @@ async def connect(
         is not installed, for callers who would rather fail than silently run
         slower. It also raises ``RuntimeError`` on Windows, where the backend
         is unsupported, before any socket work happens.
-      * ``"rustls"`` is experimental and only present in builds made with the
-        ``rustls-transport`` cargo feature; it terminates TLS in Rust on the
-        event-loop thread. It takes ``rustls_ca_file`` instead of
+      * ``"rustls"`` terminates TLS in Rust on the event-loop thread. It is in the
+        published wheels; bare ``cargo`` builds need the ``rustls-transport``
+        feature. It takes ``rustls_ca_file`` instead of
         ``ssl_context`` and does not implement client-certificate auth.
     - ``rustls_ca_file`` is a PEM trust store for ``tls_backend="rustls"``.
       Omit it to use the platform's native root certificates. Passing it with
