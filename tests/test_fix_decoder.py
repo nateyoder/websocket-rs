@@ -212,6 +212,21 @@ def test_requires_ordered_nonempty_standard_header(decoder, body_fields):
         decoder(raw_fix_frame(*body_fields, (55, b"FED"), (268, b"0")))
 
 
+@pytest.mark.parametrize("decoder", [fix.decode, fix.decode_kalshi_book])
+@pytest.mark.parametrize(
+    "body_fields",
+    [
+        ((35, b"W"), (55, b"FED"), (49, b"KALSHI"), (56, b"CLIENT"), (34, b"1"), (52, b"20260926-21:00:00.000")),
+        ((35, b"W"), (49, b"KALSHI"), (55, b"FED"), (56, b"CLIENT"), (34, b"1"), (52, b"20260926-21:00:00.000")),
+        ((35, b"W"), (49, b"KALSHI"), (56, b"CLIENT"), (34, b"1"), (55, b"FED"), (52, b"20260926-21:00:00.000")),
+    ],
+)
+def test_rejects_body_fields_before_standard_header_completion(decoder, body_fields):
+    frame = raw_fix_frame(*body_fields, (268, b"0"))
+    with pytest.raises(ValueError, match="standard header"):
+        decoder(frame)
+
+
 def test_allows_optional_fields_between_ordered_standard_header_fields():
     frame = raw_fix_frame(
         (35, b"W"),

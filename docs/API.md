@@ -63,11 +63,12 @@ while avoiding a downstream decode per field.
 
 The decoder raises `ValueError` unless the input has exact FIXT.1.1 framing,
 matching tag-9 body length, a valid tag-10 checksum, canonical numeric tags and
-group count, tag 35 third followed by ordered nonempty tags 49/56/34/52, no
-duplicate scalar tags, no duplicate tags within an entry, and exactly the
-number of entries declared by tag 268. This narrow decoder treats all body
-fields after tag 268 as members of that group. The input must be a single
-complete `bytes` object; streamed or concatenated messages are rejected.
+group count, tag 35 third followed by ordered nonempty tags 49/56/34/52 with
+only FIXT.1.1 standard-header fields between them, no duplicate scalar tags, no
+duplicate tags within an entry, and exactly the number of entries declared by
+tag 268. This narrow decoder treats all body fields after tag 268 as members of
+that group. The input must be a single complete `bytes` object; streamed or
+concatenated messages are rejected.
 
 For Kalshi book consumers, `decode_kalshi_book()` skips the generic field
 materialization and performs required-field and numeric validation in Rust:

@@ -144,6 +144,42 @@ fn group_lead_tag(fields: &[FieldRef<'_>]) -> Result<u32, String> {
     }
 }
 
+fn require_standard_header_field(
+    fields: &[FieldRef<'_>],
+    cursor: &mut usize,
+    tag: u32,
+    name: &str,
+    optional_before: &[u32],
+) -> Result<(), String> {
+    let mut optional_cursor = 0;
+    loop {
+        let field = fields
+            .get(*cursor)
+            .ok_or_else(|| format!("FIX standard header requires tag {tag} {name}"))?;
+        if field.tag == tag {
+            if field.value.is_empty() {
+                return Err(format!(
+                    "FIX standard header requires non-empty tag {tag} {name}"
+                ));
+            }
+            *cursor += 1;
+            return Ok(());
+        }
+
+        let relative = optional_before[optional_cursor..]
+            .iter()
+            .position(|candidate| *candidate == field.tag)
+            .ok_or_else(|| {
+                format!(
+                    "FIX standard header requires tag {tag} {name} before tag {}",
+                    field.tag
+                )
+            })?;
+        optional_cursor += relative + 1;
+        *cursor += 1;
+    }
+}
+
 fn validate_standard_header(fields: &[FieldRef<'_>]) -> Result<(), String> {
     let msg_type = fields
         .get(2)
@@ -156,24 +192,16 @@ fn validate_standard_header(fields: &[FieldRef<'_>]) -> Result<(), String> {
     }
 
     let mut cursor = 3;
-    for (tag, name) in [
-        (49, "SenderCompID"),
-        (56, "TargetCompID"),
-        (34, "MsgSeqNum"),
-        (52, "SendingTime"),
-    ] {
-        let relative = fields[cursor..]
-            .iter()
-            .position(|field| field.tag == tag)
-            .ok_or_else(|| format!("FIX standard header requires tag {tag} {name}"))?;
-        cursor += relative;
-        if fields[cursor].value.is_empty() {
-            return Err(format!(
-                "FIX standard header requires non-empty tag {tag} {name}"
-            ));
-        }
-        cursor += 1;
-    }
+    require_standard_header_field(fields, &mut cursor, 49, "SenderCompID", &[1128, 1156, 1129])?;
+    require_standard_header_field(fields, &mut cursor, 56, "TargetCompID", &[])?;
+    require_standard_header_field(fields, &mut cursor, 34, "MsgSeqNum", &[115, 128, 90, 91])?;
+    require_standard_header_field(
+        fields,
+        &mut cursor,
+        52,
+        "SendingTime",
+        &[50, 142, 57, 143, 116, 144, 129, 145, 43, 97],
+    )?;
     Ok(())
 }
 
@@ -678,6 +706,19 @@ mod tests {
             &b"35=W\x0156=CLIENT\x0134=1\x0152=20260926-21:00:00.000\x01"[..],
             &b"35=W\x0149=KALSHI\x0134=1\x0152=20260926-21:00:00.000\x01"[..],
             &b"35=W\x0156=CLIENT\x0149=KALSHI\x0134=1\x0152=20260926-21:00:00.000\x01"[..],
+        ] {
+            assert!(decode_frame(&raw_frame(body))
+                .unwrap_err()
+                .contains("standard header"));
+        }
+    }
+
+    #[test]
+    fn rejects_body_fields_before_standard_header_completion() {
+        for body in [
+            &b"35=W\x0155=FED\x0149=KALSHI\x0156=CLIENT\x0134=1\x0152=20260926-21:00:00.000\x01"[..],
+            &b"35=W\x0149=KALSHI\x0155=FED\x0156=CLIENT\x0134=1\x0152=20260926-21:00:00.000\x01"[..],
+            &b"35=W\x0149=KALSHI\x0156=CLIENT\x0134=1\x0155=FED\x0152=20260926-21:00:00.000\x01"[..],
         ] {
             assert!(decode_frame(&raw_frame(body))
                 .unwrap_err()
