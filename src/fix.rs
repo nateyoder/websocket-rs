@@ -144,6 +144,39 @@ fn group_lead_tag(fields: &[FieldRef<'_>]) -> Result<u32, String> {
     }
 }
 
+fn validate_standard_header(fields: &[FieldRef<'_>]) -> Result<(), String> {
+    let msg_type = fields
+        .get(2)
+        .ok_or_else(|| "FIX standard header requires tag 35 MsgType third".to_owned())?;
+    if msg_type.tag != 35 {
+        return Err("FIX standard header requires tag 35 MsgType third".into());
+    }
+    if msg_type.value.is_empty() {
+        return Err("FIX standard header requires non-empty tag 35 MsgType".into());
+    }
+
+    let mut cursor = 3;
+    for (tag, name) in [
+        (49, "SenderCompID"),
+        (56, "TargetCompID"),
+        (34, "MsgSeqNum"),
+        (52, "SendingTime"),
+    ] {
+        let relative = fields[cursor..]
+            .iter()
+            .position(|field| field.tag == tag)
+            .ok_or_else(|| format!("FIX standard header requires tag {tag} {name}"))?;
+        cursor += relative;
+        if fields[cursor].value.is_empty() {
+            return Err(format!(
+                "FIX standard header requires non-empty tag {tag} {name}"
+            ));
+        }
+        cursor += 1;
+    }
+    Ok(())
+}
+
 fn decode_frame(frame: &[u8]) -> Result<Decoded<'_>, String> {
     if frame.len() > MAX_FIX_FRAME_LEN {
         return Err(format!("FIX frame exceeds {MAX_FIX_FRAME_LEN} bytes"));
@@ -274,6 +307,7 @@ fn decode_frame(frame: &[u8]) -> Result<Decoded<'_>, String> {
             ));
         }
     }
+    validate_standard_header(&fields)?;
     fields.push(FieldRef {
         tag: 10,
         value: checksum_raw,
@@ -298,6 +332,28 @@ fn required_value<'a>(fields: &'a [FieldRef<'a>], tag: u32) -> Result<&'a [u8], 
 }
 
 fn fix_number(raw: &[u8], tag: u32) -> Result<f64, String> {
+    let unsigned = match raw.first() {
+        Some(b'+' | b'-') => &raw[1..],
+        _ => raw,
+    };
+    let mut saw_digit = false;
+    let mut saw_decimal = false;
+    for byte in unsigned {
+        match *byte {
+            b'0'..=b'9' => saw_digit = true,
+            b'.' if !saw_decimal => saw_decimal = true,
+            _ => {
+                return Err(format!(
+                    "Kalshi FIX tag {tag} must use numeric FIX decimal syntax"
+                ));
+            }
+        }
+    }
+    if !saw_digit {
+        return Err(format!(
+            "Kalshi FIX tag {tag} must use numeric FIX decimal syntax"
+        ));
+    }
     let text = std::str::from_utf8(raw)
         .map_err(|_| format!("Kalshi FIX tag {tag} must be numeric ASCII"))?;
     let value = text
@@ -483,7 +539,7 @@ pub fn register_fix(py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<()
 mod tests {
     use super::{decode_frame, parse_kalshi_book, FieldRef, SOH};
 
-    fn frame(body: &[u8]) -> Vec<u8> {
+    fn raw_frame(body: &[u8]) -> Vec<u8> {
         let mut message = format!("8=FIXT.1.1\x019={}\x01", body.len()).into_bytes();
         message.extend_from_slice(body);
         let checksum = message
@@ -491,6 +547,20 @@ mod tests {
             .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
         message.extend_from_slice(format!("10={checksum:03}\x01").as_bytes());
         message
+    }
+
+    fn frame(body: &[u8]) -> Vec<u8> {
+        let msg_type_end = body
+            .iter()
+            .position(|byte| *byte == SOH)
+            .expect("test body must contain MsgType")
+            + 1;
+        assert!(body.starts_with(b"35="));
+        let mut standard_body = body[..msg_type_end].to_vec();
+        standard_body
+            .extend_from_slice(b"49=KALSHI\x0156=CLIENT\x0134=1\x0152=20260926-21:00:00.000\x01");
+        standard_body.extend_from_slice(&body[msg_type_end..]);
+        raw_frame(&standard_body)
     }
 
     fn values(fields: &[FieldRef<'_>]) -> Vec<(u32, Vec<u8>)> {
@@ -509,6 +579,10 @@ mod tests {
             values(&decoded.fields[2..decoded.fields.len() - 1]),
             vec![
                 (35, b"W".to_vec()),
+                (49, b"KALSHI".to_vec()),
+                (56, b"CLIENT".to_vec()),
+                (34, b"1".to_vec()),
+                (52, b"20260926-21:00:00.000".to_vec()),
                 (55, b"FED-26".to_vec()),
                 (268, b"2".to_vec())
             ]
@@ -553,19 +627,19 @@ mod tests {
     #[test]
     fn projects_book_ready_snapshot_and_incremental_values() {
         let snapshot = frame(
-            b"35=W\x0134=42\x0155=FED-26\x01268=1\x01269=0\x01270=.41\x01271=17.5\x01\
+            b"35=W\x0155=FED-26\x01268=1\x01269=0\x01270=.41\x01271=17.5\x01\
               272=20260926\x01273=21:00:00.123\x01",
         );
         let decoded = decode_frame(&snapshot).unwrap();
         let book = parse_kalshi_book(&decoded).unwrap();
         assert_eq!(book.msg_type, b"W");
-        assert_eq!(book.sequence, b"42");
+        assert_eq!(book.sequence, b"1");
         assert_eq!(book.snapshot_symbol, Some(&b"FED-26"[..]));
         assert_eq!(book.entries[0].price, 0.41);
         assert_eq!(book.entries[0].size, 17.5);
 
         let incremental = frame(
-            b"35=X\x0134=43\x01268=2\x01279=1\x0155=FED-26\x01269=0\x01270=.41\x01271=18\x01\
+            b"35=X\x01268=2\x01279=1\x0155=FED-26\x01269=0\x01270=.41\x01271=18\x01\
               272=20260926\x01273=21:00:01.123\x01279=2\x0155=OTHER-26\x01269=1\x01270=.59\x01\
               271=0\x01272=20260926\x01273=21:00:01.124\x01",
         );
@@ -583,16 +657,31 @@ mod tests {
     #[test]
     fn book_projection_rejects_invalid_numeric_values() {
         for (value, needle) in [
-            (&b"nan"[..], "finite"),
+            (&b"nan"[..], "numeric"),
+            (&b"5e-1"[..], "numeric"),
             (&b"1.01"[..], "[0, 1]"),
             (&b"not-a-number"[..], "numeric"),
         ] {
-            let mut body = b"35=W\x0134=1\x0155=FED\x01268=1\x01269=0\x01270=".to_vec();
+            let mut body = b"35=W\x0155=FED\x01268=1\x01269=0\x01270=".to_vec();
             body.extend_from_slice(value);
             body.extend_from_slice(b"\x01271=1\x01272=20260926\x01273=00:00:00.000\x01");
             let message = frame(&body);
             let decoded = decode_frame(&message).unwrap();
             assert!(parse_kalshi_book(&decoded).unwrap_err().contains(needle));
+        }
+    }
+
+    #[test]
+    fn requires_ordered_standard_header_fields() {
+        for body in [
+            &b"49=KALSHI\x0135=W\x0156=CLIENT\x0134=1\x0152=20260926-21:00:00.000\x01"[..],
+            &b"35=W\x0156=CLIENT\x0134=1\x0152=20260926-21:00:00.000\x01"[..],
+            &b"35=W\x0149=KALSHI\x0134=1\x0152=20260926-21:00:00.000\x01"[..],
+            &b"35=W\x0156=CLIENT\x0149=KALSHI\x0134=1\x0152=20260926-21:00:00.000\x01"[..],
+        ] {
+            assert!(decode_frame(&raw_frame(body))
+                .unwrap_err()
+                .contains("standard header"));
         }
     }
 
