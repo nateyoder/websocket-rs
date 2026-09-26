@@ -19,6 +19,28 @@ identifies the fork; the import name stays `websocket_rs`.
 tracks only the upstream base, since Cargo requires semver and semver cannot
 express `.postN`.
 
+## [0.7.10.post3] - 2026-09-26
+
+### Added
+
+- **Native FIXT.1.1 market-data decoding.** `websocket_rs.fix.decode()` validates
+  exact framing, BodyLength, checksum, canonical tags, duplicates, and Kalshi's
+  MsgType-specific tag-268 groups (`W` entries begin with 269; `X` entries begin
+  with 279), then returns one immutable ordered field batch per frame.
+- **A typed Kalshi book fast path.** `websocket_rs.fix.decode_kalshi_book()`
+  projects validated W/X frames directly into message type, sequence, snapshot
+  symbol, and immutable entry tuples. Price and size become native floats in
+  Rust; required fields, action/type values, finite numeric bounds, and active
+  level sizes fail closed before the single Python crossing.
+
+### Performance
+
+- On the deterministic 204-byte two-entry snapshot harness (11 samples of
+  100,000 frames after fixed warmups), typed decode measured 587 ns/frame and
+  681 ns including direct canonical-book construction, versus 1,026 ns and
+  1,849 ns respectively for generic field materialization plus Python dict
+  conversion. Reproduce with `python tests/bench_fix_decoder.py`.
+
 ## [0.7.10.post2] - 2026-09-11
 
 ### Changed

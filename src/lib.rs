@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 
 mod async_client;
+mod fix;
 mod native_client;
 mod sync_client;
 
@@ -38,6 +39,9 @@ fn websocket_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Register native_client module (asyncio.Protocol-based)
     native_client::register_native_client(py, m)?;
+
+    // Register the native FIXT.1.1 frame decoder.
+    fix::register_fix(py, m)?;
 
     // Expose version
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;

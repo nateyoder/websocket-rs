@@ -1,4 +1,5 @@
 from . import async_client as async_client
+from . import fix as fix
 from . import native_client as native_client
 from . import sync as sync
 from .native_client import WSMessage as WSMessage
@@ -12,4 +13,5 @@ __all__ = [
     "native_client",
     "sync",
     "async_client",
+    "fix",
 ]
