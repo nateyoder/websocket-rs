@@ -30,11 +30,13 @@ sys.modules["websocket_rs.sync"] = _websocket_rs.sync
 sys.modules["websocket_rs.sync.client"] = _websocket_rs.sync.client
 sys.modules["websocket_rs.async_client"] = _websocket_rs.async_client
 sys.modules["websocket_rs.native_client"] = _websocket_rs.native_client
+sys.modules["websocket_rs.fix"] = _websocket_rs.fix
 
 # Submodules for callers that want explicit addressing.
 sync = _websocket_rs.sync
 async_client = _websocket_rs.async_client
 native_client = _websocket_rs.native_client
+fix = _websocket_rs.fix
 
 # Canonical API: async connect returns a NativeClient.
 connect = native_client.connect
@@ -67,4 +69,5 @@ __all__ = [
     "native_client",
     "sync",
     "async_client",
+    "fix",
 ]

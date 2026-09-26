@@ -8,7 +8,7 @@ Complete API reference for websocket-rs.
 ## Installation
 
 ```bash
-uv pip install "websocket-rs-nateyoder==0.7.10.post2" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post2
+uv pip install "websocket-rs-nateyoder==0.7.10.post3" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post3
 ```
 
 ## Quick Start
@@ -37,6 +37,57 @@ async def main():
 
 asyncio.run(main())
 ```
+
+---
+
+## Native FIXT.1.1 Decoder
+
+### `websocket_rs.fix.decode()`
+
+Validate and decode one complete FIXT.1.1 message in a single native call.
+
+```python
+from websocket_rs import fix
+
+fields, entries = fix.decode(frame_bytes)
+message = dict(fields)
+book = [dict(entry) for entry in entries]
+```
+
+The return value is `(fields, entries)`. `fields` is an ordered tuple of
+`(int, str)` pairs and includes tags 8, 9, 268, and 10. `entries` is a tuple of
+ordered field tuples for the tag-268 repeating group. Snapshot (`35=W`) entries
+must begin with tag 269; incremental (`35=X`) entries must begin with tag 279.
+Values use Latin-1's one-byte mapping, preserving arbitrary FIX value bytes
+while avoiding a downstream decode per field.
+
+The decoder raises `ValueError` unless the input has exact FIXT.1.1 framing,
+matching tag-9 body length, a valid tag-10 checksum, canonical numeric tags and
+group count, tag 35 third followed by ordered nonempty tags 49/56/34/52 with
+only FIXT.1.1 standard-header fields between them, no duplicate scalar tags, no
+duplicate tags within an entry, and exactly the number of entries declared by
+tag 268. This narrow decoder treats all body fields after tag 268 as members of
+that group. The input must be a single complete `bytes` object; streamed or
+concatenated messages are rejected.
+
+For Kalshi book consumers, `decode_kalshi_book()` skips the generic field
+materialization and performs required-field and numeric validation in Rust:
+
+```python
+msg_type, sequence, snapshot_symbol, entries = fix.decode_kalshi_book(frame_bytes)
+for action, symbol, entry_type, price, size, date, time in entries:
+    ...
+```
+
+The result is an immutable tuple. Prices and sizes are native floats; all other
+wire values are lossless Latin-1 strings. Snapshot (`W`) messages require tag
+34, a top-level tag 55, and entry tags 269/270/271/272/273. Incremental (`X`)
+messages require tag 34 and entry tags 279/55/269/270/271/272/273. Prices must
+be finite and within `[0, 1]`, sizes must be finite and nonnegative, and active
+bid/offer levels must have positive size. The generic framing, checksum,
+duplicate, and group-count validation runs before this typed projection.
+Numeric values use FIX decimal syntax; exponent notation and other host-float
+spellings are rejected before conversion.
 
 ---
 
