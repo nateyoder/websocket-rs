@@ -19,6 +19,23 @@ identifies the fork; the import name stays `websocket_rs`.
 tracks only the upstream base, since Cargo requires semver and semver cannot
 express `.postN`.
 
+## [0.7.10.post4] - 2026-09-26
+
+### Added
+
+- **Native Kalshi WebSocket book projection.**
+  `websocket_rs.fix.decode_kalshi_ws_book()` parses snapshot and delta JSON into
+  one immutable batch while retaining prices as ten-thousandths of a dollar and
+  sizes as hundredths of a contract. Valid non-book JSON returns `None`; malformed
+  book identity, sequencing, sides, and fixed-point fields fail closed.
+
+### Performance
+
+- In pmkt-clients' deterministic real-capture benchmark, routing the current
+  WebSocket state path through this projection reduced snapshot-plus-delta median
+  time from 269,396 ns to 242,954 ns (9.8%), while preserving the exact normalized
+  output hash. Snapshot and delta medians improved independently.
+
 ## [0.7.10.post3] - 2026-09-26
 
 ### Added

@@ -8,7 +8,7 @@ Complete API reference for websocket-rs.
 ## Installation
 
 ```bash
-uv pip install "websocket-rs-nateyoder==0.7.10.post3" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post3
+uv pip install "websocket-rs-nateyoder==0.7.10.post4" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post4
 ```
 
 ## Quick Start
@@ -88,6 +88,22 @@ bid/offer levels must have positive size. The generic framing, checksum,
 duplicate, and group-count validation runs before this typed projection.
 Numeric values use FIX decimal syntax; exponent notation and other host-float
 spellings are rejected before conversion.
+
+### `websocket_rs.fix.decode_kalshi_ws_book()`
+
+Project a Kalshi WebSocket fixed-point book message directly from JSON bytes:
+
+```python
+book = fix.decode_kalshi_ws_book(frame_bytes)
+if book is not None:
+    message_type, sid, sequence, ticker, market_id, yes, no, side, price, delta = book
+```
+
+The decoder returns `None` for valid non-book JSON. Snapshots carry immutable
+`(price, size)` tuples in `yes` and `no`; deltas carry `side`, `price`, and
+signed `delta`. Prices are exact integer ten-thousandths of a dollar and sizes
+are exact integer hundredths of a contract. Malformed JSON and incomplete or
+invalid book frames raise `ValueError`.
 
 ---
 

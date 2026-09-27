@@ -10,7 +10,7 @@ name = "websocket-rs-nateyoder"
 # spell a fork marker that PyPI will accept (local versions like "+ncy1" are
 # rejected on upload), so the fork identity lives in the distribution name and
 # ".postN" keeps this line from ever colliding with an upstream version.
-version = "0.7.10.post3"
+version = "0.7.10.post4"
 description = "Fork of websocket-rs: high-performance WebSocket client for Python using Rust"
 readme = "README.pypi.md"
 authors = [
@@ -59,6 +59,7 @@ dev = [
     "aiofastnet>=1.1.0,<2",
 ]
 test = [
+    "hypothesis>=6.0",
     "pytest>=7.0",
     "pytest-asyncio>=1.3.0",
     "websockets>=12.0",
@@ -100,6 +101,7 @@ ignore = [
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.0",
     "maturin>=1.0",
     "pytest>=7.0",
     "websockets>=12.0",
