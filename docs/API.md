@@ -8,7 +8,7 @@ Complete API reference for websocket-rs.
 ## Installation
 
 ```bash
-uv pip install "websocket-rs-nateyoder==0.7.10.post3" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post3
+uv pip install "websocket-rs-nateyoder==0.7.10.post4" --find-links https://github.com/nateyoder/websocket-rs/releases/expanded_assets/v0.7.10.post4
 ```
 
 ## Quick Start
@@ -88,6 +88,57 @@ bid/offer levels must have positive size. The generic framing, checksum,
 duplicate, and group-count validation runs before this typed projection.
 Numeric values use FIX decimal syntax; exponent notation and other host-float
 spellings are rejected before conversion.
+
+### `websocket_rs.fix.decode_kalshi_ws_book()`
+
+Project a Kalshi WebSocket fixed-point book message directly from JSON bytes:
+
+```python
+book = fix.decode_kalshi_ws_book(frame_bytes)
+if book is not None:
+    message_type, sid, sequence, ticker, market_id, yes, no, side, price, delta = book
+```
+
+The decoder returns `None` for valid non-book JSON. Snapshots carry immutable
+`(price, size)` tuples in `yes` and `no`; deltas carry `side`, `price`, and
+signed `delta`. Prices are exact integer ten-thousandths of a dollar and sizes
+are exact integer hundredths of a contract. Malformed JSON and incomplete or
+invalid book frames raise `ValueError`.
+
+For maintained feeds that need routing metadata before state application, use
+`decode_kalshi_ws_book_frame(frame_bytes)`. It returns a Rust-owned
+`KalshiWsBookFrame` with `message_type`, `sid`, `sequence`, `ticker`,
+`market_id`, and `venue_timestamp` properties. Passing that object to
+`KalshiWsBookState.apply_decoded()` reuses the parsed update, avoiding a second
+JSON parse and a temporary Python object tree. Frames that do not contain a
+Kalshi order-book message return `None` for the generic decoder to handle.
+
+### `websocket_rs.fix.KalshiWsBookState`
+
+Maintain the complete fixed-point ladders in Rust while publishing a bounded
+immutable depth:
+
+```python
+state = fix.KalshiWsBookState(
+    publication_depth=1,
+    use_yes_price=False,
+    enforce_sequence=True,
+)
+bids, asks = state.apply(frame_bytes)
+
+decoded = fix.decode_kalshi_ws_book_frame(frame_bytes)
+if decoded is not None:
+    bids, asks = state.apply_decoded(decoded)
+```
+
+`publication_depth` is a positive per-side limit. The state still retains every
+resident level, so a deeper level becomes visible when a better level is removed.
+Zero-size levels are removed and may later be refilled. `use_yes_price=False`
+complements NO bids into canonical YES asks; `True` treats the wire's NO ladder
+as already carrying YES ask prices. Crossed books, negative resulting sizes,
+missing snapshot baselines, malformed frames, and enabled sequence gaps raise
+`ValueError` and invalidate the affected state. `reset()`, `baseline_ready()`,
+and `invalidate_tickers()` support maintained-feed lifecycle management.
 
 ---
 

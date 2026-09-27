@@ -19,6 +19,38 @@ identifies the fork; the import name stays `websocket_rs`.
 tracks only the upstream base, since Cargo requires semver and semver cannot
 express `.postN`.
 
+## [0.7.10.post4] - 2026-09-26
+
+### Added
+
+- **Native Kalshi WebSocket book projection.**
+  `websocket_rs.fix.decode_kalshi_ws_book()` parses snapshot and delta JSON into
+  one immutable batch while retaining prices as ten-thousandths of a dollar and
+  sizes as hundredths of a contract. Valid non-book JSON returns `None`; malformed
+  book identity, sequencing, sides, and fixed-point fields fail closed.
+- **Stateful native Kalshi WebSocket books.** `KalshiWsBookState` keeps complete
+  fixed-point bid and ask ladders in Rust, applies snapshots and signed deltas,
+  removes empty levels, validates spread and optional sequence continuity, and
+  returns only the configured immutable publication depth.
+- **Single-pass Kalshi book frames.** `decode_kalshi_ws_book_frame()` returns a
+  Rust-owned frame carrying routing metadata and parsed book data;
+  `KalshiWsBookState.apply_decoded()` consumes that object without reparsing JSON
+  or materializing a Python dictionary.
+
+### Performance
+
+- In pmkt-clients' deterministic real-capture benchmark, routing the current
+  WebSocket state path through this projection reduced snapshot-plus-delta median
+  time from 269,396 ns to 242,954 ns (9.8%), while preserving the exact normalized
+  output hash. Snapshot and delta medians improved independently.
+- On the same captured WebSocket delta, the stateful Rust core applied the update
+  and selected depth one in 589 ns. The pmkt-clients wire-to-TOB path measured
+  6,843 ns versus 10,528 ns for its Python maintained book, a 35.0% reduction;
+  the remaining time is generic Python frame/Payload/snapshot handling.
+- Reusing one Rust-owned decode at the socket and state boundaries reduced the
+  production-shaped depth-one snapshot-plus-delta path from 36,964 ns to
+  29,556 ns (20.0%) and a steady-state delta from 7,093 ns to 6,261 ns (11.7%).
+
 ## [0.7.10.post3] - 2026-09-26
 
 ### Added
