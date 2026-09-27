@@ -21,6 +21,22 @@ type KalshiWsBookPublication = tuple[
     tuple[KalshiWsLevel, ...],
 ]
 
+class KalshiWsBookFrame:
+    """Rust-owned decoded Kalshi book frame reusable without reparsing JSON."""
+
+    @property
+    def message_type(self) -> str: ...
+    @property
+    def sid(self) -> int: ...
+    @property
+    def sequence(self) -> int: ...
+    @property
+    def ticker(self) -> str: ...
+    @property
+    def market_id(self) -> str: ...
+    @property
+    def venue_timestamp(self) -> str | None: ...
+
 class KalshiWsBookState:
     """Maintain full fixed-point ladders and publish a bounded immutable depth."""
 
@@ -32,6 +48,9 @@ class KalshiWsBookState:
         enforce_sequence: bool = False,
     ) -> None: ...
     def apply(self, frame: bytes, /) -> KalshiWsBookPublication | None: ...
+    def apply_decoded(
+        self, frame: KalshiWsBookFrame, /
+    ) -> KalshiWsBookPublication: ...
     def reset(self) -> None: ...
     def baseline_ready(self, market_id: str, /) -> bool: ...
     def invalidate_tickers(self, tickers: set[str], /) -> None: ...
@@ -59,3 +78,6 @@ def decode_kalshi_ws_book(frame: bytes, /) -> KalshiWsBookBatch | None:
     dollar and sizes are hundredths of a contract. Malformed JSON, book shapes,
     identities, sequences, sides, and fixed-point values raise ``ValueError``.
     """
+
+def decode_kalshi_ws_book_frame(frame: bytes, /) -> KalshiWsBookFrame | None:
+    """Decode a book frame once into a Rust-owned state-ready object."""

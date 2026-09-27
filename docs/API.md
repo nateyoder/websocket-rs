@@ -105,6 +105,14 @@ signed `delta`. Prices are exact integer ten-thousandths of a dollar and sizes
 are exact integer hundredths of a contract. Malformed JSON and incomplete or
 invalid book frames raise `ValueError`.
 
+For maintained feeds that need routing metadata before state application, use
+`decode_kalshi_ws_book_frame(frame_bytes)`. It returns a Rust-owned
+`KalshiWsBookFrame` with `message_type`, `sid`, `sequence`, `ticker`,
+`market_id`, and `venue_timestamp` properties. Passing that object to
+`KalshiWsBookState.apply_decoded()` reuses the parsed update, avoiding a second
+JSON parse and a temporary Python object tree. Frames that do not contain a
+Kalshi order-book message return `None` for the generic decoder to handle.
+
 ### `websocket_rs.fix.KalshiWsBookState`
 
 Maintain the complete fixed-point ladders in Rust while publishing a bounded
@@ -117,6 +125,10 @@ state = fix.KalshiWsBookState(
     enforce_sequence=True,
 )
 bids, asks = state.apply(frame_bytes)
+
+decoded = fix.decode_kalshi_ws_book_frame(frame_bytes)
+if decoded is not None:
+    bids, asks = state.apply_decoded(decoded)
 ```
 
 `publication_depth` is a positive per-side limit. The state still retains every

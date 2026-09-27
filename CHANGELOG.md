@@ -32,6 +32,10 @@ express `.postN`.
   fixed-point bid and ask ladders in Rust, applies snapshots and signed deltas,
   removes empty levels, validates spread and optional sequence continuity, and
   returns only the configured immutable publication depth.
+- **Single-pass Kalshi book frames.** `decode_kalshi_ws_book_frame()` returns a
+  Rust-owned frame carrying routing metadata and parsed book data;
+  `KalshiWsBookState.apply_decoded()` consumes that object without reparsing JSON
+  or materializing a Python dictionary.
 
 ### Performance
 
@@ -43,6 +47,9 @@ express `.postN`.
   and selected depth one in 589 ns. The pmkt-clients wire-to-TOB path measured
   6,843 ns versus 10,528 ns for its Python maintained book, a 35.0% reduction;
   the remaining time is generic Python frame/Payload/snapshot handling.
+- Reusing one Rust-owned decode at the socket and state boundaries reduced the
+  production-shaped depth-one snapshot-plus-delta path from 36,964 ns to
+  29,556 ns (20.0%) and a steady-state delta from 7,093 ns to 6,261 ns (11.7%).
 
 ## [0.7.10.post3] - 2026-09-26
 

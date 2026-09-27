@@ -48,6 +48,10 @@ struct KalshiWsMessage<'a> {
     delta_fp: Option<&'a str>,
     #[serde(borrow)]
     side: Option<&'a str>,
+    #[serde(borrow)]
+    ts_ms: Option<&'a RawValue>,
+    #[serde(borrow)]
+    ts: Option<&'a RawValue>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -57,6 +61,7 @@ enum KalshiWsBook<'a> {
         sequence: u64,
         ticker: &'a str,
         market_id: &'a str,
+        venue_timestamp: Option<String>,
         yes: Vec<(i64, i64)>,
         no: Vec<(i64, i64)>,
     },
@@ -65,10 +70,69 @@ enum KalshiWsBook<'a> {
         sequence: u64,
         ticker: &'a str,
         market_id: &'a str,
+        venue_timestamp: Option<String>,
         side: &'a str,
         price: i64,
         delta: i64,
     },
+}
+
+#[derive(Debug)]
+enum KalshiWsBookUpdate {
+    Snapshot {
+        yes: Vec<(i64, i64)>,
+        no: Vec<(i64, i64)>,
+    },
+    Delta {
+        side: String,
+        price: i64,
+        delta: i64,
+    },
+}
+
+/// One Rust-owned Kalshi book frame decoded once at the socket boundary.
+#[pyclass(module = "websocket_rs.fix", frozen)]
+struct KalshiWsBookFrame {
+    message_type: &'static str,
+    sid: u64,
+    sequence: u64,
+    ticker: String,
+    market_id: String,
+    venue_timestamp: Option<String>,
+    update: KalshiWsBookUpdate,
+}
+
+#[pymethods]
+impl KalshiWsBookFrame {
+    #[getter]
+    fn message_type(&self) -> &'static str {
+        self.message_type
+    }
+
+    #[getter]
+    fn sid(&self) -> u64 {
+        self.sid
+    }
+
+    #[getter]
+    fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    #[getter]
+    fn ticker(&self) -> &str {
+        &self.ticker
+    }
+
+    #[getter]
+    fn market_id(&self) -> &str {
+        &self.market_id
+    }
+
+    #[getter]
+    fn venue_timestamp(&self) -> Option<&str> {
+        self.venue_timestamp.as_deref()
+    }
 }
 
 #[derive(Debug)]
@@ -154,7 +218,7 @@ impl KalshiWsBookState {
 
         match decoded {
             KalshiWsBook::Snapshot { yes, no, .. } => {
-                self.apply_snapshot(ticker, market_id, yes, no)?;
+                self.apply_snapshot(ticker, market_id, &yes, &no)?;
             }
             KalshiWsBook::Delta {
                 side, price, delta, ..
@@ -162,6 +226,27 @@ impl KalshiWsBookState {
                 self.apply_delta(ticker, market_id, side, price, delta)?;
             }
         }
+        self.publication(py, market_id)
+    }
+
+    fn apply_decoded<'py>(
+        &mut self,
+        py: Python<'py>,
+        frame: &KalshiWsBookFrame,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.validate_sequence(frame.sid, frame.sequence)?;
+        match &frame.update {
+            KalshiWsBookUpdate::Snapshot { yes, no } => {
+                self.apply_snapshot(&frame.ticker, &frame.market_id, yes, no)?;
+            }
+            KalshiWsBookUpdate::Delta { side, price, delta } => {
+                self.apply_delta(&frame.ticker, &frame.market_id, side, *price, *delta)?;
+            }
+        }
+        self.publication(py, &frame.market_id)
+    }
+
+    fn publication<'py>(&self, py: Python<'py>, market_id: &str) -> PyResult<Bound<'py, PyAny>> {
         let book = self
             .books
             .get(market_id)
@@ -222,15 +307,17 @@ impl KalshiWsBookState {
         &mut self,
         ticker: &str,
         market_id: &str,
-        yes: Vec<(i64, i64)>,
-        no: Vec<(i64, i64)>,
+        yes: &[(i64, i64)],
+        no: &[(i64, i64)],
     ) -> PyResult<()> {
         let bids = yes
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|(_, size)| *size > 0)
             .collect::<BTreeMap<_, _>>();
         let asks = no
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|(_, size)| *size > 0)
             .map(|(price, size)| (self.ask_price(price), size))
             .collect::<BTreeMap<_, _>>();
@@ -377,6 +464,16 @@ where
         .map_err(|error| format!("Kalshi WebSocket book frame has invalid {label}: {error}"))
 }
 
+fn kalshi_ws_timestamp(value: Option<&RawValue>) -> Option<String> {
+    let raw = value?.get();
+    if raw == "null" {
+        return None;
+    }
+    serde_json::from_str::<String>(raw)
+        .ok()
+        .or_else(|| Some(raw.to_owned()))
+}
+
 fn decode_kalshi_ws_book(frame: &[u8]) -> Result<Option<KalshiWsBook<'_>>, String> {
     if frame.iter().find(|byte| !byte.is_ascii_whitespace()) != Some(&b'{') {
         serde_json::from_slice::<serde::de::IgnoredAny>(frame)
@@ -397,6 +494,8 @@ fn decode_kalshi_ws_book(frame: &[u8]) -> Result<Option<KalshiWsBook<'_>>, Strin
     let message: KalshiWsMessage<'_> = parse_ws_raw(envelope.msg, "msg")?;
     let ticker = required(message.market_ticker, "msg.market_ticker")?;
     let market_id = required(message.market_id, "msg.market_id")?;
+    let venue_timestamp =
+        kalshi_ws_timestamp(message.ts_ms).or_else(|| kalshi_ws_timestamp(message.ts));
     if sid == 0 || sequence == 0 {
         return Err("Kalshi WebSocket book sid and seq must be positive".into());
     }
@@ -423,6 +522,7 @@ fn decode_kalshi_ws_book(frame: &[u8]) -> Result<Option<KalshiWsBook<'_>>, Strin
             sequence,
             ticker,
             market_id,
+            venue_timestamp,
             yes: parse_levels(message.yes_dollars_fp.unwrap_or_default(), "yes")?,
             no: parse_levels(message.no_dollars_fp.unwrap_or_default(), "no")?,
         }));
@@ -452,6 +552,7 @@ fn decode_kalshi_ws_book(frame: &[u8]) -> Result<Option<KalshiWsBook<'_>>, Strin
         sequence,
         ticker,
         market_id,
+        venue_timestamp,
         side,
         price,
         delta,
@@ -1031,6 +1132,7 @@ fn decode_kalshi_ws_book_py<'py>(
             market_id,
             yes,
             no,
+            venue_timestamp: _,
         } => [
             PyString::new(py, "orderbook_snapshot").into_any(),
             sid.into_pyobject(py)?.into_any(),
@@ -1051,6 +1153,7 @@ fn decode_kalshi_ws_book_py<'py>(
             side,
             price,
             delta,
+            venue_timestamp: _,
         } => [
             PyString::new(py, "orderbook_delta").into_any(),
             sid.into_pyobject(py)?.into_any(),
@@ -1067,12 +1170,74 @@ fn decode_kalshi_ws_book_py<'py>(
     Ok(PyTuple::new(py, values)?.into_any())
 }
 
+/// Decode one Kalshi book frame into a Rust-owned object reusable by book state.
+#[pyfunction]
+#[pyo3(signature = (frame, /))]
+fn decode_kalshi_ws_book_frame(frame: &Bound<'_, PyBytes>) -> PyResult<Option<KalshiWsBookFrame>> {
+    let bytes = frame.as_bytes();
+    if !bytes
+        .windows(b"orderbook_snapshot".len())
+        .any(|window| window == b"orderbook_snapshot")
+        && !bytes
+            .windows(b"orderbook_delta".len())
+            .any(|window| window == b"orderbook_delta")
+    {
+        return Ok(None);
+    }
+    let Some(book) = decode_kalshi_ws_book(bytes).map_err(PyValueError::new_err)? else {
+        return Ok(None);
+    };
+    Ok(Some(match book {
+        KalshiWsBook::Snapshot {
+            sid,
+            sequence,
+            ticker,
+            market_id,
+            venue_timestamp,
+            yes,
+            no,
+        } => KalshiWsBookFrame {
+            message_type: "orderbook_snapshot",
+            sid,
+            sequence,
+            ticker: ticker.to_owned(),
+            market_id: market_id.to_owned(),
+            venue_timestamp,
+            update: KalshiWsBookUpdate::Snapshot { yes, no },
+        },
+        KalshiWsBook::Delta {
+            sid,
+            sequence,
+            ticker,
+            market_id,
+            venue_timestamp,
+            side,
+            price,
+            delta,
+        } => KalshiWsBookFrame {
+            message_type: "orderbook_delta",
+            sid,
+            sequence,
+            ticker: ticker.to_owned(),
+            market_id: market_id.to_owned(),
+            venue_timestamp,
+            update: KalshiWsBookUpdate::Delta {
+                side: side.to_owned(),
+                price,
+                delta,
+            },
+        },
+    }))
+}
+
 pub fn register_fix(py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let module = PyModule::new(py, "fix")?;
+    module.add_class::<KalshiWsBookFrame>()?;
     module.add_class::<KalshiWsBookState>()?;
     module.add_function(wrap_pyfunction!(decode_py, &module)?)?;
     module.add_function(wrap_pyfunction!(decode_kalshi_book_py, &module)?)?;
     module.add_function(wrap_pyfunction!(decode_kalshi_ws_book_py, &module)?)?;
+    module.add_function(wrap_pyfunction!(decode_kalshi_ws_book_frame, &module)?)?;
     parent.add_submodule(&module)?;
     py.import("sys")?
         .getattr("modules")?

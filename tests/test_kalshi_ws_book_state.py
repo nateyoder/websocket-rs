@@ -136,6 +136,70 @@ def test_native_book_matches_full_model_through_empty_and_refilled_levels(
     assert first_result == _expected(yes, no, depth)
 
 
+@given(
+    depth=st.integers(1, 8),
+    case=_uncrossed_books_and_transitions(),
+)
+@example(
+    depth=1,
+    case=({4_000: 100}, {1_000: 200}, [("yes", 4_000, 0), ("yes", 4_000, 300)]),
+)
+def test_once_decoded_frames_match_raw_application_through_transitions(depth, case):
+    yes, no, transitions = case
+    raw_state = fix.KalshiWsBookState(publication_depth=depth, use_yes_price=False)
+    decoded_state = fix.KalshiWsBookState(publication_depth=depth, use_yes_price=False)
+    wires = [_snapshot(list(yes.items()), list(no.items()))]
+    current = {"yes": dict(yes), "no": dict(no)}
+    for sequence, (side, price, target) in enumerate(transitions, start=2):
+        ladder = current[side]
+        wires.append(_delta(side, price, target - ladder.get(price, 0), sequence=sequence))
+        if target == 0:
+            ladder.pop(price, None)
+        else:
+            ladder[price] = target
+
+    for wire in wires:
+        decoded = fix.decode_kalshi_ws_book_frame(wire)
+        assert decoded is not None
+        assert decoded_state.apply_decoded(decoded) == raw_state.apply(wire)
+
+
+def test_once_decoded_frame_exposes_routing_metadata_without_python_json_tree():
+    wire = _wire(
+        {
+            "type": "orderbook_delta",
+            "sid": 7,
+            "seq": 2,
+            "msg": {
+                "market_ticker": "KXTEST-26",
+                "market_id": "market-id",
+                "side": "yes",
+                "price_dollars": "0.4000",
+                "delta_fp": "1.00",
+                "ts_ms": 1784307037482,
+            },
+        }
+    )
+
+    decoded = fix.decode_kalshi_ws_book_frame(wire)
+
+    assert decoded is not None
+    assert decoded.message_type == "orderbook_delta"
+    assert decoded.sid == 7
+    assert decoded.sequence == 2
+    assert decoded.ticker == "KXTEST-26"
+    assert decoded.market_id == "market-id"
+    assert decoded.venue_timestamp == "1784307037482"
+
+
+def test_once_decoder_leaves_non_book_validation_to_the_generic_parser():
+    assert fix.decode_kalshi_ws_book_frame(b'{"type":"trade"}') is None
+    assert fix.decode_kalshi_ws_book_frame(b"not-json") is None
+
+    with pytest.raises(ValueError, match="invalid Kalshi WebSocket JSON"):
+        fix.decode_kalshi_ws_book_frame(b'{"type":"orderbook_delta"')
+
+
 def test_native_book_lifecycle_and_sequence_fail_closed():
     state = fix.KalshiWsBookState(
         publication_depth=1,
