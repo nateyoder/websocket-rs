@@ -28,6 +28,10 @@ express `.postN`.
   one immutable batch while retaining prices as ten-thousandths of a dollar and
   sizes as hundredths of a contract. Valid non-book JSON returns `None`; malformed
   book identity, sequencing, sides, and fixed-point fields fail closed.
+- **Stateful native Kalshi WebSocket books.** `KalshiWsBookState` keeps complete
+  fixed-point bid and ask ladders in Rust, applies snapshots and signed deltas,
+  removes empty levels, validates spread and optional sequence continuity, and
+  returns only the configured immutable publication depth.
 
 ### Performance
 
@@ -35,6 +39,10 @@ express `.postN`.
   WebSocket state path through this projection reduced snapshot-plus-delta median
   time from 269,396 ns to 242,954 ns (9.8%), while preserving the exact normalized
   output hash. Snapshot and delta medians improved independently.
+- On the same captured WebSocket delta, the stateful Rust core applied the update
+  and selected depth one in 589 ns. The pmkt-clients wire-to-TOB path measured
+  6,843 ns versus 10,528 ns for its Python maintained book, a 35.0% reduction;
+  the remaining time is generic Python frame/Payload/snapshot handling.
 
 ## [0.7.10.post3] - 2026-09-26
 

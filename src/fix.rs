@@ -5,12 +5,13 @@
 //! wire byte maps losslessly to one Python code point without a UTF-8 failure
 //! path or a downstream per-field decode.
 
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::c_char;
 use std::ptr;
 
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyBytes, PyModule, PyString, PyTuple};
+use pyo3::types::{PyAny, PyBool, PyBytes, PyModule, PyString, PyTuple};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
@@ -68,6 +69,246 @@ enum KalshiWsBook<'a> {
         price: i64,
         delta: i64,
     },
+}
+
+#[derive(Debug)]
+struct NativeKalshiBook {
+    ticker: String,
+    bids: BTreeMap<i64, i64>,
+    asks: BTreeMap<i64, i64>,
+}
+
+/// Stateful fixed-point Kalshi book that retains full depth and publishes only N rows.
+#[pyclass(module = "websocket_rs.fix")]
+struct KalshiWsBookState {
+    publication_depth: usize,
+    use_yes_price: bool,
+    enforce_sequence: bool,
+    books: HashMap<String, NativeKalshiBook>,
+    sequences: HashMap<u64, u64>,
+}
+
+#[pymethods]
+impl KalshiWsBookState {
+    #[new]
+    #[pyo3(signature = (*, publication_depth, use_yes_price, enforce_sequence=false))]
+    fn new(
+        publication_depth: &Bound<'_, PyAny>,
+        use_yes_price: bool,
+        enforce_sequence: bool,
+    ) -> PyResult<Self> {
+        if publication_depth.is_instance_of::<PyBool>() {
+            return Err(PyTypeError::new_err(
+                "publication_depth must be a positive integer",
+            ));
+        }
+        let publication_depth = publication_depth
+            .extract::<usize>()
+            .map_err(|_| PyTypeError::new_err("publication_depth must be a positive integer"))?;
+        if publication_depth == 0 {
+            return Err(PyValueError::new_err(
+                "publication_depth must be a positive integer",
+            ));
+        }
+        Ok(Self {
+            publication_depth,
+            use_yes_price,
+            enforce_sequence,
+            books: HashMap::new(),
+            sequences: HashMap::new(),
+        })
+    }
+
+    fn apply<'py>(
+        &mut self,
+        py: Python<'py>,
+        frame: &Bound<'py, PyBytes>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let decoded = match decode_kalshi_ws_book(frame.as_bytes()) {
+            Ok(decoded) => decoded,
+            Err(error) => {
+                self.reset();
+                return Err(PyValueError::new_err(error));
+            }
+        };
+        let Some(decoded) = decoded else {
+            return Ok(py.None().into_bound(py));
+        };
+        let (sid, sequence, ticker, market_id) = match &decoded {
+            KalshiWsBook::Snapshot {
+                sid,
+                sequence,
+                ticker,
+                market_id,
+                ..
+            }
+            | KalshiWsBook::Delta {
+                sid,
+                sequence,
+                ticker,
+                market_id,
+                ..
+            } => (*sid, *sequence, *ticker, *market_id),
+        };
+        self.validate_sequence(sid, sequence)?;
+
+        match decoded {
+            KalshiWsBook::Snapshot { yes, no, .. } => {
+                self.apply_snapshot(ticker, market_id, yes, no)?;
+            }
+            KalshiWsBook::Delta {
+                side, price, delta, ..
+            } => {
+                self.apply_delta(ticker, market_id, side, price, delta)?;
+            }
+        }
+        let book = self
+            .books
+            .get(market_id)
+            .expect("an accepted Kalshi update must leave a resident book");
+        let bids = book
+            .bids
+            .iter()
+            .rev()
+            .take(self.publication_depth)
+            .map(|(&price, &size)| (price, size))
+            .collect::<Vec<_>>();
+        let asks = book
+            .asks
+            .iter()
+            .take(self.publication_depth)
+            .map(|(&price, &size)| (price, size))
+            .collect::<Vec<_>>();
+        let values = [
+            kalshi_ws_levels(py, &bids)?.into_any(),
+            kalshi_ws_levels(py, &asks)?.into_any(),
+        ];
+        Ok(PyTuple::new(py, values)?.into_any())
+    }
+
+    fn reset(&mut self) {
+        self.books.clear();
+        self.sequences.clear();
+    }
+
+    fn baseline_ready(&self, market_id: &str) -> bool {
+        self.books.contains_key(market_id)
+            || self.books.values().any(|book| book.ticker == market_id)
+    }
+
+    fn invalidate_tickers(&mut self, tickers: HashSet<String>) {
+        self.books
+            .retain(|_, book| !tickers.contains(book.ticker.as_str()));
+    }
+}
+
+impl KalshiWsBookState {
+    fn validate_sequence(&mut self, sid: u64, sequence: u64) -> PyResult<()> {
+        if !self.enforce_sequence {
+            return Ok(());
+        }
+        if let Some(previous) = self.sequences.get(&sid) {
+            if previous.checked_add(1) != Some(sequence) {
+                let error = format!("Kalshi book sequence gap after {previous}");
+                self.reset();
+                return Err(PyValueError::new_err(error));
+            }
+        }
+        self.sequences.insert(sid, sequence);
+        Ok(())
+    }
+
+    fn apply_snapshot(
+        &mut self,
+        ticker: &str,
+        market_id: &str,
+        yes: Vec<(i64, i64)>,
+        no: Vec<(i64, i64)>,
+    ) -> PyResult<()> {
+        let bids = yes
+            .into_iter()
+            .filter(|(_, size)| *size > 0)
+            .collect::<BTreeMap<_, _>>();
+        let asks = no
+            .into_iter()
+            .filter(|(_, size)| *size > 0)
+            .map(|(price, size)| (self.ask_price(price), size))
+            .collect::<BTreeMap<_, _>>();
+        let book = NativeKalshiBook {
+            ticker: ticker.to_owned(),
+            bids,
+            asks,
+        };
+        if Self::crossed(&book) {
+            self.reset();
+            return Err(PyValueError::new_err("Kalshi crossed book snapshot"));
+        }
+        self.books.insert(market_id.to_owned(), book);
+        Ok(())
+    }
+
+    fn apply_delta(
+        &mut self,
+        ticker: &str,
+        market_id: &str,
+        side: &str,
+        wire_price: i64,
+        delta: i64,
+    ) -> PyResult<()> {
+        let ask_price = self.ask_price(wire_price);
+        let Some(book) = self.books.get_mut(market_id) else {
+            return Err(PyValueError::new_err(
+                "Kalshi book delta requires a fresh snapshot",
+            ));
+        };
+        if book.ticker != ticker {
+            self.books.remove(market_id);
+            return Err(PyValueError::new_err(
+                "Kalshi book delta identity does not match its snapshot",
+            ));
+        }
+        let (ladder, price) = if side == "yes" {
+            (&mut book.bids, wire_price)
+        } else {
+            (&mut book.asks, ask_price)
+        };
+        let previous = ladder.get(&price).copied().unwrap_or_default();
+        let Some(size) = previous.checked_add(delta) else {
+            self.books.remove(market_id);
+            return Err(PyValueError::new_err(
+                "Kalshi book size is outside the supported range",
+            ));
+        };
+        if size < 0 {
+            self.books.remove(market_id);
+            return Err(PyValueError::new_err("Kalshi book level became negative"));
+        }
+        if size == 0 {
+            ladder.remove(&price);
+        } else {
+            ladder.insert(price, size);
+        }
+        if Self::crossed(book) {
+            self.books.remove(market_id);
+            return Err(PyValueError::new_err("Kalshi crossed book update"));
+        }
+        Ok(())
+    }
+
+    fn ask_price(&self, wire_price: i64) -> i64 {
+        if self.use_yes_price {
+            wire_price
+        } else {
+            10_000 - wire_price
+        }
+    }
+
+    fn crossed(book: &NativeKalshiBook) -> bool {
+        match (book.bids.last_key_value(), book.asks.first_key_value()) {
+            (Some((&bid, _)), Some((&ask, _))) => bid > ask,
+            _ => false,
+        }
+    }
 }
 
 fn parse_fixed(raw: &str, scale: u32, signed: bool, label: &str) -> Result<i64, String> {
@@ -828,6 +1069,7 @@ fn decode_kalshi_ws_book_py<'py>(
 
 pub fn register_fix(py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let module = PyModule::new(py, "fix")?;
+    module.add_class::<KalshiWsBookState>()?;
     module.add_function(wrap_pyfunction!(decode_py, &module)?)?;
     module.add_function(wrap_pyfunction!(decode_kalshi_book_py, &module)?)?;
     module.add_function(wrap_pyfunction!(decode_kalshi_ws_book_py, &module)?)?;

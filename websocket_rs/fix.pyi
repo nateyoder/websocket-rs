@@ -16,6 +16,25 @@ type KalshiWsBookBatch = tuple[
     int | None,
     int | None,
 ]
+type KalshiWsBookPublication = tuple[
+    tuple[KalshiWsLevel, ...],
+    tuple[KalshiWsLevel, ...],
+]
+
+class KalshiWsBookState:
+    """Maintain full fixed-point ladders and publish a bounded immutable depth."""
+
+    def __init__(
+        self,
+        *,
+        publication_depth: int,
+        use_yes_price: bool,
+        enforce_sequence: bool = False,
+    ) -> None: ...
+    def apply(self, frame: bytes, /) -> KalshiWsBookPublication | None: ...
+    def reset(self) -> None: ...
+    def baseline_ready(self, market_id: str, /) -> bool: ...
+    def invalidate_tickers(self, tickers: set[str], /) -> None: ...
 
 def decode(frame: bytes, /) -> tuple[FieldBatch, EntryBatch]:
     """Validate and decode one complete FIXT.1.1 frame.

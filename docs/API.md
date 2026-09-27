@@ -105,6 +105,29 @@ signed `delta`. Prices are exact integer ten-thousandths of a dollar and sizes
 are exact integer hundredths of a contract. Malformed JSON and incomplete or
 invalid book frames raise `ValueError`.
 
+### `websocket_rs.fix.KalshiWsBookState`
+
+Maintain the complete fixed-point ladders in Rust while publishing a bounded
+immutable depth:
+
+```python
+state = fix.KalshiWsBookState(
+    publication_depth=1,
+    use_yes_price=False,
+    enforce_sequence=True,
+)
+bids, asks = state.apply(frame_bytes)
+```
+
+`publication_depth` is a positive per-side limit. The state still retains every
+resident level, so a deeper level becomes visible when a better level is removed.
+Zero-size levels are removed and may later be refilled. `use_yes_price=False`
+complements NO bids into canonical YES asks; `True` treats the wire's NO ladder
+as already carrying YES ask prices. Crossed books, negative resulting sizes,
+missing snapshot baselines, malformed frames, and enabled sequence gaps raise
+`ValueError` and invalidate the affected state. `reset()`, `baseline_ready()`,
+and `invalidate_tickers()` support maintained-feed lifecycle management.
+
 ---
 
 ## Sync API
