@@ -20,6 +20,7 @@ struct State {
     ciphertext: Vec<u8>,
     closing: bool,
     read_paused: bool,
+    peer_closed: bool,
 }
 
 const MAX_PENDING_PLAINTEXT: usize = 1024 * 1024;
@@ -76,6 +77,7 @@ impl RustlsTransport {
                 ciphertext: Vec::new(),
                 closing: false,
                 read_paused: false,
+                peer_closed: false,
             }),
         })
     }
@@ -193,6 +195,26 @@ impl RustlsTransport {
             }
         }
     }
+
+    fn finish_peer_close(&self, py: Python<'_>) -> PyResult<()> {
+        let terminal = {
+            let st = self.state.borrow();
+            if st.closing || !st.peer_closed || st.read_paused {
+                return Ok(());
+            }
+            st.plaintext_used == st.plaintext.len()
+        };
+        if terminal {
+            self.close(py)
+        } else {
+            self.fail(
+                py,
+                PyConnectionError::new_err(
+                    "Rust TLS peer closed with an incomplete WebSocket frame",
+                ),
+            )
+        }
+    }
 }
 
 fn websocket_frame_len(data: &[u8]) -> PyResult<Option<usize>> {
@@ -250,7 +272,7 @@ impl RustlsTransport {
         if self.state.borrow().closing {
             return Ok(());
         }
-        let decoded: PyResult<bool> = (|| {
+        let decoded: PyResult<()> = (|| {
             let mut st = self.state.borrow_mut();
             let mut input = data;
             // Kept at its high-water length, never cleared: `read_to_end` treats
@@ -312,18 +334,18 @@ impl RustlsTransport {
                     }
                 }
             }
-            Ok(peer_closed)
+            if peer_closed {
+                st.peer_closed = true;
+            }
+            Ok(())
         })();
-        let peer_closed = match decoded {
-            Ok(v) => v,
+        match decoded {
+            Ok(()) => (),
             Err(e) => return self.fail(py, e),
-        };
+        }
         self.flush(py)?;
         self.drain_plaintext(py)?;
-        if peer_closed {
-            self.close(py)?;
-        }
-        Ok(())
+        self.finish_peer_close(py)
     }
 
     fn write(&self, py: Python<'_>, data: &[u8]) -> PyResult<()> {
@@ -416,6 +438,7 @@ impl RustlsTransport {
             st.read_paused = false;
         }
         self.drain_plaintext(py)?;
+        self.finish_peer_close(py)?;
         let transport = {
             let st = self.state.borrow();
             if st.closing || st.read_paused || st.plaintext_used != st.plaintext.len() {

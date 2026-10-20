@@ -481,3 +481,56 @@ def test_rustls_read_flow_stops_inside_a_multiframe_tls_burst(loop_name, certs):
 
     with asyncio.Runner(loop_factory=loop_factory) as runner:
         runner.run(run())
+
+
+@pytest.mark.skipif(not _rustls_available(), reason="built without the rustls-transport feature")
+def test_rustls_peer_close_waits_for_paused_plaintext_on_uvloop(certs):
+    """A TLS terminal notification cannot discard frames retained at a pause boundary."""
+    loop_factory = pytest.importorskip("uvloop").new_event_loop
+    cert, key = certs
+
+    async def run():
+        start = asyncio.Event()
+        paused = asyncio.Event()
+        complete = asyncio.Event()
+        seen = []
+        holder = {}
+
+        async def burst_and_close(ws):
+            await start.wait()
+            frames = b"".join(b"\x82\x04" + i.to_bytes(4, "big") for i in range(128))
+            ws.transport.write(frames)
+            ws.transport.close()
+
+        def on_message(message):
+            seen.append(int.from_bytes(bytes(message), "big"))
+            if len(seen) == 16:
+                holder["client"].pause_reading()
+                paused.set()
+            if len(seen) == 128:
+                complete.set()
+
+        async with _Peer(cert, key, handler=burst_and_close) as peer:
+            client = await connect(
+                peer.url,
+                connect_timeout=10,
+                on_message=on_message,
+                **_backend_kwargs("rustls", cert),
+            )
+            holder["client"] = client
+            start.set()
+            await asyncio.wait_for(paused.wait(), RECV_TIMEOUT)
+            await asyncio.sleep(0.05)
+            assert seen == list(range(16))
+            assert not client.closed
+            client.resume_reading()
+            await asyncio.wait_for(complete.wait(), RECV_TIMEOUT)
+            assert seen == list(range(128))
+            for _ in range(100):
+                if client.closed:
+                    break
+                await asyncio.sleep(0.01)
+            assert client.closed
+
+    with asyncio.Runner(loop_factory=loop_factory) as runner:
+        runner.run(run())
