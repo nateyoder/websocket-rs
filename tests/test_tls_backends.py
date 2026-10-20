@@ -431,6 +431,7 @@ def test_rustls_read_flow_stops_inside_a_multiframe_tls_burst(loop_name, certs):
     async def run():
         start = asyncio.Event()
         paused = asyncio.Event()
+        paused_again = asyncio.Event()
         complete = asyncio.Event()
         server_release = asyncio.Event()
         seen = []
@@ -454,6 +455,9 @@ def test_rustls_read_flow_stops_inside_a_multiframe_tls_burst(loop_name, certs):
                 holder["client"].pause_reading()
                 holder["client"].pause_reading()
                 paused.set()
+            elif len(seen) == 17:
+                holder["client"].pause_reading()
+                paused_again.set()
             if len(seen) == 128:
                 complete.set()
 
@@ -470,11 +474,76 @@ def test_rustls_read_flow_stops_inside_a_multiframe_tls_burst(loop_name, certs):
             await asyncio.sleep(0.05)
             assert seen == list(range(16))
             client.resume_reading()
+            await asyncio.wait_for(paused_again.wait(), RECV_TIMEOUT)
+            await asyncio.sleep(0.05)
+            assert seen == list(range(17))
+            client.resume_reading()
             client.resume_reading()
             await asyncio.wait_for(complete.wait(), RECV_TIMEOUT)
             assert seen == list(range(128))
             client.close()
             client.resume_reading()
+            server_release.set()
+            del holder["client"]
+            await asyncio.sleep(0)
+
+    with asyncio.Runner(loop_factory=loop_factory) as runner:
+        runner.run(run())
+
+
+@pytest.mark.skipif(not _rustls_available(), reason="built without the rustls-transport feature")
+@pytest.mark.parametrize("loop_name", ["asyncio", "uvloop"])
+@pytest.mark.parametrize("split", [1, 3], ids=["ordinary-header", "extended-header"])
+def test_rustls_resume_fetches_tail_for_partial_frame(loop_name, split, certs):
+    """Resuming a retained partial header must re-enable the raw TCP transport."""
+    if loop_name == "uvloop":
+        loop_factory = pytest.importorskip("uvloop").new_event_loop
+    else:
+        loop_factory = asyncio.SelectorEventLoop
+
+    cert, key = certs
+
+    async def run():
+        start = asyncio.Event()
+        paused = asyncio.Event()
+        send_tail = asyncio.Event()
+        complete = asyncio.Event()
+        server_release = asyncio.Event()
+        seen = []
+        holder = {}
+        final = b"\x82\x01z" if split == 1 else b"\x82\x7e\x00\x80" + (b"z" * 128)
+
+        async def partial_frame(ws):
+            await start.wait()
+            ws.transport.write((b"\x82\x01x" * 16) + final[:split])
+            await send_tail.wait()
+            ws.transport.write(final[split:])
+            await server_release.wait()
+
+        def on_message(message):
+            seen.append(bytes(message))
+            if len(seen) == 16:
+                holder["client"].pause_reading()
+                paused.set()
+            elif len(seen) == 17:
+                complete.set()
+
+        async with _Peer(cert, key, handler=partial_frame) as peer:
+            client = await connect(
+                peer.url,
+                connect_timeout=10,
+                on_message=on_message,
+                **_backend_kwargs("rustls", cert),
+            )
+            holder["client"] = client
+            start.set()
+            await asyncio.wait_for(paused.wait(), RECV_TIMEOUT)
+            assert seen == [b"x"] * 16
+            client.resume_reading()
+            send_tail.set()
+            await asyncio.wait_for(complete.wait(), 1)
+            assert seen == ([b"x"] * 16) + [b"z" * (1 if split == 1 else 128)]
+            client.close()
             server_release.set()
             del holder["client"]
             await asyncio.sleep(0)

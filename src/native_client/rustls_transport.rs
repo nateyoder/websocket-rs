@@ -473,7 +473,7 @@ impl RustlsTransport {
         self.finish_peer_close(py)?;
         let transport = {
             let st = self.state.borrow();
-            if st.closing || st.read_paused || st.plaintext_used != st.plaintext.len() {
+            if st.closing || st.read_paused {
                 None
             } else {
                 st.transport.as_ref().map(|t| t.clone_ref(py))
