@@ -58,38 +58,107 @@ def _rustls_available():
 
 @pytest.fixture(scope="session")
 def certs(tmp_path_factory):
-    """Self-signed localhost cert/key, generated per session.
+    """Local CA and CA-signed localhost cert/key, generated per session.
 
     Generated rather than committed so the suite needs no `make tls-certs` step
-    and no checked-in private key.
+    and no checked-in private key. Keep the trust anchor separate from the leaf:
+    OpenSSL 3.6 rejects a ``CA:FALSE`` self-signed leaf as a trust anchor, while
+    rustls rejects malformed CA/leaf extension combinations independently.
     """
     if shutil.which("openssl") is None:
         pytest.skip("openssl is required to generate the test certificate")
     d = tmp_path_factory.mktemp("certs")
-    cert, key = d / "cert.pem", d / "key.pem"
+    ca_cert, ca_key = d / "ca.pem", d / "ca-key.pem"
+    cert, key, csr = d / "cert.pem", d / "key.pem", d / "cert.csr"
+    extensions = d / "extensions.cnf"
     subprocess.run(
         [
-            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-days", "1", "-nodes",
-            "-keyout", str(key), "-out", str(cert),
-            "-subj", "/CN=127.0.0.1",
-            "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1",
-            "-addext", "basicConstraints=critical,CA:FALSE",
-            "-addext", "extendedKeyUsage=serverAuth",
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-days",
+            "1",
+            "-nodes",
+            "-keyout",
+            str(ca_key),
+            "-out",
+            str(ca_cert),
+            "-subj",
+            "/CN=websocket-rs test CA",
+            "-addext",
+            "basicConstraints=critical,CA:TRUE,pathlen:0",
+            "-addext",
+            "keyUsage=critical,keyCertSign,cRLSign",
         ],
         check=True,
         capture_output=True,
     )
-    return cert, key
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(key),
+            "-out",
+            str(csr),
+            "-subj",
+            "/CN=127.0.0.1",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    extensions.write_text(
+        "\n".join(
+            [
+                "subjectAltName=DNS:localhost,IP:127.0.0.1",
+                "basicConstraints=critical,CA:FALSE",
+                "keyUsage=critical,digitalSignature,keyEncipherment",
+                "extendedKeyUsage=serverAuth",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [
+            "openssl",
+            "x509",
+            "-req",
+            "-days",
+            "1",
+            "-in",
+            str(csr),
+            "-CA",
+            str(ca_cert),
+            "-CAkey",
+            str(ca_key),
+            "-CAcreateserial",
+            "-out",
+            str(cert),
+            "-extfile",
+            str(extensions),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return cert, key, ca_cert
 
 
-def _backend_kwargs(backend, cert):
-    """Connect kwargs that trust `cert` under the given backend.
+def _backend_kwargs(backend, ca_cert):
+    """Connect kwargs that trust `ca_cert` under the given backend.
 
     rustls does not accept an ``ssl.SSLContext``; it takes a PEM trust file.
     """
     if backend == "rustls":
-        return {"tls_backend": "rustls", "rustls_ca_file": str(cert)}
-    return {"tls_backend": backend, "ssl_context": ssl.create_default_context(cafile=str(cert))}
+        return {"tls_backend": "rustls", "rustls_ca_file": str(ca_cert)}
+    return {
+        "tls_backend": backend,
+        "ssl_context": ssl.create_default_context(cafile=str(ca_cert)),
+    }
 
 
 BACKENDS = [
@@ -168,7 +237,7 @@ async def test_tls_answers_a_server_ping(backend, certs):
     (FOLLOWUPS F13). Isolating it means that flake cannot take the rest of the
     TLS coverage with it.
     """
-    cert, key = certs
+    cert, key, ca_cert = certs
 
     async def ping_peer(ws):
         await asyncio.wait_for(await ws.ping(b"tls-control"), RECV_TIMEOUT)
@@ -176,7 +245,7 @@ async def test_tls_answers_a_server_ping(backend, certs):
         await ws.wait_closed()
 
     async with _Peer(cert, key, handler=ping_peer) as peer:
-        ws = await connect(peer.url, connect_timeout=10, **_backend_kwargs(backend, cert))
+        ws = await connect(peer.url, connect_timeout=10, **_backend_kwargs(backend, ca_cert))
         try:
             assert bytes(await asyncio.wait_for(ws.recv(), RECV_TIMEOUT)) == b"ponged"
         finally:
@@ -186,9 +255,9 @@ async def test_tls_answers_a_server_ping(backend, certs):
 @pytest.mark.parametrize("backend", BACKENDS)
 async def test_tls_round_trip(backend, certs):
     """Fragments, ordering and a multi-record payload, per backend."""
-    cert, key = certs
+    cert, key, ca_cert = certs
     async with _Peer(cert, key) as peer:
-        ws = await connect(peer.url, connect_timeout=10, **_backend_kwargs(backend, cert))
+        ws = await connect(peer.url, connect_timeout=10, **_backend_kwargs(backend, ca_cert))
         try:
             assert bytes(await asyncio.wait_for(ws.recv(), RECV_TIMEOUT)) == b"fragmented"
             for i in range(32):
@@ -206,7 +275,7 @@ async def test_tls_round_trip(backend, certs):
 @pytest.mark.parametrize("backend", BACKENDS)
 async def test_tls_rejects_untrusted_certificate(backend, certs):
     """A backend that silently skipped verification would be a security regression."""
-    cert, key = certs
+    cert, key, _ca_cert = certs
     async with _Peer(cert, key) as peer:
         # No trust material of any kind: every backend falls back to system
         # roots, which do not sign this certificate.
@@ -225,7 +294,7 @@ def helper():
 @pytest.mark.skipif(not HAVE_AIOFASTNET, reason="aiofastnet is not installed")
 async def test_auto_routes_tls_through_aiofastnet(helper, certs):
     """`auto` is only worth defaulting to if it actually picks the fast transport."""
-    cert, _key = certs
+    cert, key, ca_cert = certs
     calls = []
     real = helper._resolve_aiofastnet()
     assert real is not None
@@ -236,17 +305,18 @@ async def test_auto_routes_tls_through_aiofastnet(helper, certs):
 
     saved = helper._aiofastnet_create_connection
     helper._aiofastnet_create_connection = spy
+
     async def idle(ws):
         """The spy test only needs the handshake, so it must not fail on an
         immediate client close the way the full battery handler would."""
         await ws.wait_closed()
 
     try:
-        async with _Peer(*certs, handler=idle) as peer:
+        async with _Peer(cert, key, handler=idle) as peer:
             ws = await connect(
                 peer.url,
                 connect_timeout=10,
-                ssl_context=ssl.create_default_context(cafile=str(cert)),
+                ssl_context=ssl.create_default_context(cafile=str(ca_cert)),
             )
             ws.close()
     finally:
@@ -331,7 +401,7 @@ async def test_tls_through_a_socks5_proxy(backend, certs):
 
     from tests.bench_socks5_handshake import _serve_socks5
 
-    cert, _key = certs
+    cert, key, ca_cert = certs
     ready = threading.Event()
     bound = []
     threading.Thread(
@@ -340,12 +410,12 @@ async def test_tls_through_a_socks5_proxy(backend, certs):
     assert ready.wait(timeout=5), "SOCKS5 proxy did not start"
     proxy_port = bound[0]
 
-    async with _Peer(*certs, handler=lambda ws: ws.send(b"proxied")) as peer:
+    async with _Peer(cert, key, handler=lambda ws: ws.send(b"proxied")) as peer:
         ws = await connect(
             peer.url,
             proxy=f"socks5://127.0.0.1:{proxy_port}",
             connect_timeout=10,
-            **_backend_kwargs(backend, cert),
+            **_backend_kwargs(backend, ca_cert),
         )
         try:
             assert bytes(await asyncio.wait_for(ws.recv(), RECV_TIMEOUT)) == b"proxied"
@@ -384,7 +454,7 @@ async def test_rustls_delivers_on_message_callbacks(certs):
     otherwise go unnoticed. The server writes both frames in a single raw
     ``transport.write`` so they arrive in one record and one ``data_received``.
     """
-    cert, key = certs
+    cert, key, ca_cert = certs
     seen = []
     done = asyncio.get_running_loop().create_future()
 
@@ -402,7 +472,7 @@ async def test_rustls_delivers_on_message_callbacks(certs):
             peer.url,
             connect_timeout=10,
             on_message=on_message,
-            **_backend_kwargs("rustls", cert),
+            **_backend_kwargs("rustls", ca_cert),
         )
         try:
             await asyncio.wait_for(done, RECV_TIMEOUT)
@@ -426,7 +496,7 @@ def test_rustls_read_flow_stops_inside_a_multiframe_tls_burst(loop_name, certs):
     else:
         loop_factory = asyncio.SelectorEventLoop
 
-    cert, key = certs
+    cert, key, ca_cert = certs
 
     async def run():
         start = asyncio.Event()
@@ -466,7 +536,7 @@ def test_rustls_read_flow_stops_inside_a_multiframe_tls_burst(loop_name, certs):
                 peer.url,
                 connect_timeout=10,
                 on_message=on_message,
-                **_backend_kwargs("rustls", cert),
+                **_backend_kwargs("rustls", ca_cert),
             )
             holder["client"] = client
             start.set()
@@ -501,7 +571,7 @@ def test_rustls_resume_fetches_tail_for_partial_frame(loop_name, split, certs):
     else:
         loop_factory = asyncio.SelectorEventLoop
 
-    cert, key = certs
+    cert, key, ca_cert = certs
 
     async def run():
         start = asyncio.Event()
@@ -533,7 +603,7 @@ def test_rustls_resume_fetches_tail_for_partial_frame(loop_name, split, certs):
                 peer.url,
                 connect_timeout=10,
                 on_message=on_message,
-                **_backend_kwargs("rustls", cert),
+                **_backend_kwargs("rustls", ca_cert),
             )
             holder["client"] = client
             start.set()
@@ -556,7 +626,7 @@ def test_rustls_resume_fetches_tail_for_partial_frame(loop_name, split, certs):
 def test_rustls_peer_close_waits_for_paused_plaintext_on_uvloop(certs):
     """A TLS terminal notification cannot discard frames retained at a pause boundary."""
     loop_factory = pytest.importorskip("uvloop").new_event_loop
-    cert, key = certs
+    cert, key, ca_cert = certs
 
     async def run():
         start = asyncio.Event()
@@ -584,7 +654,7 @@ def test_rustls_peer_close_waits_for_paused_plaintext_on_uvloop(certs):
                 peer.url,
                 connect_timeout=10,
                 on_message=on_message,
-                **_backend_kwargs("rustls", cert),
+                **_backend_kwargs("rustls", ca_cert),
             )
             holder["client"] = client
             start.set()
@@ -610,7 +680,7 @@ def test_rustls_peer_close_waits_for_paused_plaintext_on_uvloop(certs):
 def test_rustls_capacity_error_reaches_pending_and_later_recv_on_uvloop(certs, monkeypatch):
     """The Rust TLS transport forwards its capacity cause through teardown."""
     loop_factory = pytest.importorskip("uvloop").new_event_loop
-    cert, key = certs
+    cert, key, ca_cert = certs
 
     async def run():
         start = asyncio.Event()
@@ -642,7 +712,7 @@ def test_rustls_capacity_error_reaches_pending_and_later_recv_on_uvloop(certs, m
             client = await connect(
                 peer.url,
                 connect_timeout=10,
-                **_backend_kwargs("rustls", cert),
+                **_backend_kwargs("rustls", ca_cert),
             )
             assert type(captured["rustls_transport"]).__name__ == "RustlsTransport"
             pending = asyncio.ensure_future(client.recv())
