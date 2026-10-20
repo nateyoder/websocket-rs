@@ -16,6 +16,9 @@ from collections.abc import AsyncIterator, Callable
 from types import TracebackType
 from typing import Self
 
+class NativeReceiveCapacityError(ConnectionError):
+    """The native Rust TLS receive path exhausted its 1 MiB plaintext bound."""
+
 class WSMessage:
     """Zero-copy view over a received WebSocket frame payload.
 
@@ -46,7 +49,11 @@ class NativeClient:
 
     async def recv(self) -> WSMessage:
         """Wait for the next server message and return it as a zero-copy
-        :class:`WSMessage`."""
+        :class:`WSMessage`.
+
+        Raises :class:`NativeReceiveCapacityError` when Rust TLS plaintext
+        already returned by the TLS engine exceeds the documented 1 MiB bound.
+        """
         ...
 
     def ping(self, data: bytes | None = None) -> None:
@@ -97,6 +104,10 @@ class NativeClient:
     @property
     def closed(self) -> bool:
         """True once the connection has been torn down (client or peer)."""
+        ...
+    @property
+    def terminal_error(self) -> BaseException | None:
+        """Typed local terminal cause, or ``None`` for ordinary closure."""
         ...
     # Addresses proxy transport.get_extra_info(); IPv6 peers report
     # 4-tuples (host, port, flowinfo, scope), not plain (host, port).
@@ -188,7 +199,8 @@ async def connect(
     - :meth:`NativeClient.pause_reading` stops TCP reads and, for the Rust TLS
       backend, stops delivery at the current WebSocket frame boundary. At most
       1 MiB of plaintext already returned by the TLS engine is retained; a
-      larger transport callback fails explicitly. :meth:`resume_reading`
+      larger transport callback raises :class:`NativeReceiveCapacityError` from
+      :meth:`NativeClient.recv`. :meth:`resume_reading`
       delivers that retained data in order before re-enabling TCP reads.
     - ``zero_copy_min_bytes`` (default 4096) is the payload size at or above
       which a received payload is sliced out of the receive buffer instead of

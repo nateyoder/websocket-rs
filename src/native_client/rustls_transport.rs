@@ -8,6 +8,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
 use super::client::NativeClient;
+use super::NativeReceiveCapacityError;
 
 struct State {
     tls: rustls::ClientConnection,
@@ -21,10 +22,23 @@ struct State {
     closing: bool,
     read_paused: bool,
     peer_closed: bool,
+    terminal_error: Option<Py<PyAny>>,
 }
 
 const MAX_PENDING_PLAINTEXT: usize = 1024 * 1024;
 const MAX_HANDSHAKE_BYTES: usize = 64 * 1024;
+
+fn ensure_pending_plaintext_capacity(pending: usize, additional: usize) -> PyResult<()> {
+    if pending
+        .checked_add(additional)
+        .is_none_or(|total| total > MAX_PENDING_PLAINTEXT)
+    {
+        return Err(NativeReceiveCapacityError::new_err(
+            "Rust TLS pending plaintext exceeds 1 MiB read-flow bound",
+        ));
+    }
+    Ok(())
+}
 
 #[pyclass(unsendable)]
 pub(super) struct RustlsTransport {
@@ -78,6 +92,7 @@ impl RustlsTransport {
                 closing: false,
                 read_paused: false,
                 peer_closed: false,
+                terminal_error: None,
             }),
         })
     }
@@ -110,9 +125,11 @@ impl RustlsTransport {
     }
 
     fn fail(&self, py: Python<'_>, err: PyErr) -> PyResult<()> {
+        let error = err.value(py).clone().unbind();
         let (inner, transport) = {
             let mut st = self.state.borrow_mut();
             st.closing = true;
+            st.terminal_error = Some(error.clone_ref(py).into_any());
             (
                 st.inner.as_ref().map(|c| c.clone_ref(py)),
                 st.transport.as_ref().map(|t| t.clone_ref(py)),
@@ -217,6 +234,25 @@ impl RustlsTransport {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_plaintext_bound_has_a_stable_public_error_type() {
+        Python::initialize();
+        Python::attach(|py| {
+            assert!(ensure_pending_plaintext_capacity(MAX_PENDING_PLAINTEXT, 0).is_ok());
+            let error = ensure_pending_plaintext_capacity(MAX_PENDING_PLAINTEXT, 1).unwrap_err();
+            assert!(error.is_instance_of::<NativeReceiveCapacityError>(py));
+            assert_eq!(
+                error.to_string(),
+                "NativeReceiveCapacityError: Rust TLS pending plaintext exceeds 1 MiB read-flow bound"
+            );
+        });
+    }
+}
+
 fn websocket_frame_len(data: &[u8]) -> PyResult<Option<usize>> {
     if data.len() < 2 {
         return Ok(None);
@@ -306,11 +342,7 @@ impl RustlsTransport {
                 let want = io.plaintext_bytes_to_read();
                 if want > 0 {
                     let pending = st.plaintext.len() - st.plaintext_used;
-                    if pending + want > MAX_PENDING_PLAINTEXT {
-                        return Err(PyConnectionError::new_err(
-                            "Rust TLS pending plaintext exceeds 1 MiB read-flow bound",
-                        ));
-                    }
+                    ensure_pending_plaintext_capacity(pending, want)?;
                     if st.plaintext_used > 0 {
                         let used = st.plaintext_used;
                         st.plaintext.copy_within(used.., 0);
@@ -480,16 +512,17 @@ impl RustlsTransport {
     }
 
     fn connection_lost(&self, py: Python<'_>, exc: Py<PyAny>) -> PyResult<()> {
-        let inner = {
+        let (inner, terminal_error) = {
             let mut st = self.state.borrow_mut();
             st.closing = true;
             st.plaintext.clear();
             st.plaintext_used = 0;
             st.transport = None;
-            st.inner.take()
+            (st.inner.take(), st.terminal_error.take())
         };
         if let Some(c) = inner {
-            c.bind(py).call_method1("connection_lost", (exc,))?;
+            c.bind(py)
+                .call_method1("connection_lost", (terminal_error.unwrap_or(exc),))?;
         }
         Ok(())
     }

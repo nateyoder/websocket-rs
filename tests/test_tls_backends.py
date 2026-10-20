@@ -16,7 +16,7 @@ import sys
 
 import pytest
 
-from websocket_rs.native_client import connect
+from websocket_rs.native_client import NativeReceiveCapacityError, connect
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
@@ -531,6 +531,39 @@ def test_rustls_peer_close_waits_for_paused_plaintext_on_uvloop(certs):
                     break
                 await asyncio.sleep(0.01)
             assert client.closed
+            assert client.terminal_error is None
+
+    with asyncio.Runner(loop_factory=loop_factory) as runner:
+        runner.run(run())
+
+
+@pytest.mark.skipif(not _rustls_available(), reason="built without the rustls-transport feature")
+def test_rustls_capacity_error_reaches_pending_and_later_recv_on_uvloop(certs):
+    """The Rust TLS terminal cause survives the NativeClient teardown boundary."""
+    loop_factory = pytest.importorskip("uvloop").new_event_loop
+    cert, key = certs
+
+    async def run():
+        async def idle(ws):
+            await ws.wait_closed()
+
+        async with _Peer(cert, key, handler=idle) as peer:
+            client = await connect(
+                peer.url,
+                connect_timeout=10,
+                **_backend_kwargs("rustls", cert),
+            )
+            pending = asyncio.ensure_future(client.recv())
+            cause = NativeReceiveCapacityError(
+                "Rust TLS pending plaintext exceeds 1 MiB read-flow bound"
+            )
+            client.connection_lost(cause)
+            assert client.terminal_error is cause
+            with pytest.raises(NativeReceiveCapacityError, match="1 MiB read-flow bound"):
+                await asyncio.wait_for(pending, RECV_TIMEOUT)
+            with pytest.raises(NativeReceiveCapacityError, match="1 MiB read-flow bound"):
+                await client.recv()
+            client.close()
 
     with asyncio.Runner(loop_factory=loop_factory) as runner:
         runner.run(run())
