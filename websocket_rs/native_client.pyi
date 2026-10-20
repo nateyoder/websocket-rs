@@ -105,6 +105,14 @@ class NativeClient:
     @property
     def remote_address(self) -> tuple[str | bytes, int, ...] | None: ...
 
+    def pause_reading(self) -> None:
+        """Pause inbound socket reads and message delivery."""
+        ...
+
+    def resume_reading(self) -> None:
+        """Resume ordered inbound message delivery and socket reads."""
+        ...
+
     def pong(self, data: bytes | None = None) -> None:
         """Send a pong frame proactively; same 125-byte limit as ping."""
         ...
@@ -177,6 +185,11 @@ async def connect(
       are NOT queued for :meth:`NativeClient.recv` — the callback receives
       each :class:`WSMessage` directly and must not ``await``. Leave as
       ``None`` for typical async/await usage.
+    - :meth:`NativeClient.pause_reading` stops TCP reads and, for the Rust TLS
+      backend, stops delivery at the current WebSocket frame boundary. At most
+      1 MiB of plaintext already returned by the TLS engine is retained; a
+      larger transport callback fails explicitly. :meth:`resume_reading`
+      delivers that retained data in order before re-enabling TCP reads.
     - ``zero_copy_min_bytes`` (default 4096) is the payload size at or above
       which a received payload is sliced out of the receive buffer instead of
       copied, saving a memcpy per message on the BufferedProtocol path. A

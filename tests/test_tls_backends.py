@@ -409,3 +409,75 @@ async def test_rustls_delivers_on_message_callbacks(certs):
         finally:
             ws.close()
     assert seen == [b"first", b"second"]
+
+
+@pytest.mark.skipif(not _rustls_available(), reason="built without the rustls-transport feature")
+@pytest.mark.parametrize("loop_name", ["asyncio", "uvloop"])
+def test_rustls_read_flow_stops_inside_a_multiframe_tls_burst(loop_name, certs):
+    """A callback pause stops the parser at that frame, not after its TLS burst.
+
+    The peer writes 128 frames in one call. The client pauses at 16, observes no
+    callbacks while paused, then resumes and receives every sequence number once
+    and in order. Running this against uvloop covers its actual TCP transport;
+    the asyncio cell prevents the wrapper contract drifting between loops.
+    """
+    if loop_name == "uvloop":
+        loop_factory = pytest.importorskip("uvloop").new_event_loop
+    else:
+        loop_factory = asyncio.SelectorEventLoop
+
+    cert, key = certs
+
+    async def run():
+        start = asyncio.Event()
+        paused = asyncio.Event()
+        complete = asyncio.Event()
+        server_release = asyncio.Event()
+        seen = []
+        holder = {}
+
+        async def burst(ws):
+            await start.wait()
+            payloads = [b"x" * (256 * 1024) + (0).to_bytes(4, "big")]
+            payloads.extend(i.to_bytes(4, "big") for i in range(1, 128))
+            frames = b"".join(
+                b"\x82\x7f" + len(payload).to_bytes(8, "big") + payload if len(payload) > 65535
+                else b"\x82\x04" + payload
+                for payload in payloads
+            )
+            ws.transport.write(frames)
+            await server_release.wait()
+
+        def on_message(message):
+            seen.append(int.from_bytes(bytes(message)[-4:], "big"))
+            if len(seen) == 16:
+                holder["client"].pause_reading()
+                holder["client"].pause_reading()
+                paused.set()
+            if len(seen) == 128:
+                complete.set()
+
+        async with _Peer(cert, key, handler=burst) as peer:
+            client = await connect(
+                peer.url,
+                connect_timeout=10,
+                on_message=on_message,
+                **_backend_kwargs("rustls", cert),
+            )
+            holder["client"] = client
+            start.set()
+            await asyncio.wait_for(paused.wait(), RECV_TIMEOUT)
+            await asyncio.sleep(0.05)
+            assert seen == list(range(16))
+            client.resume_reading()
+            client.resume_reading()
+            await asyncio.wait_for(complete.wait(), RECV_TIMEOUT)
+            assert seen == list(range(128))
+            client.close()
+            client.resume_reading()
+            server_release.set()
+            del holder["client"]
+            await asyncio.sleep(0)
+
+    with asyncio.Runner(loop_factory=loop_factory) as runner:
+        runner.run(run())

@@ -771,6 +771,35 @@ impl NativeClient {
         Ok(())
     }
 
+    /// Pause socket reads at the active transport. Rust TLS additionally stops
+    /// parser delivery at the current WebSocket frame boundary.
+    fn pause_reading(&self, py: Python<'_>) -> PyResult<()> {
+        let transport = self
+            .state
+            .borrow()
+            .transport
+            .as_ref()
+            .map(|t| t.clone_ref(py));
+        if let Some(transport) = transport {
+            transport.bind(py).call_method0("pause_reading")?;
+        }
+        Ok(())
+    }
+
+    /// Resume parser delivery before re-enabling reads on the raw transport.
+    fn resume_reading(&self, py: Python<'_>) -> PyResult<()> {
+        let transport = self
+            .state
+            .borrow()
+            .transport
+            .as_ref()
+            .map(|t| t.clone_ref(py));
+        if let Some(transport) = transport {
+            transport.bind(py).call_method0("resume_reading")?;
+        }
+        Ok(())
+    }
+
     /// The peer half-closed (TCP FIN, or TLS close_notify). No further frame can
     /// arrive, so let the transport close itself and let `connection_lost` do the
     /// cleanup: returning true would mean "the protocol keeps this open", which is
