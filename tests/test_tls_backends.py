@@ -63,14 +63,52 @@ def certs(tmp_path_factory):
     Generated rather than committed so the suite needs no `make tls-certs` step
     and no checked-in private key. Keep the trust anchor separate from the leaf:
     OpenSSL 3.6 rejects a ``CA:FALSE`` self-signed leaf as a trust anchor, while
-    rustls rejects malformed CA/leaf extension combinations independently.
+    rustls rejects malformed CA/leaf extension combinations independently. Use
+    explicit configs so platform OpenSSL defaults cannot alter either profile.
     """
     if shutil.which("openssl") is None:
         pytest.skip("openssl is required to generate the test certificate")
     d = tmp_path_factory.mktemp("certs")
     ca_cert, ca_key = d / "ca.pem", d / "ca-key.pem"
     cert, key, csr = d / "cert.pem", d / "key.pem", d / "cert.csr"
-    extensions = d / "extensions.cnf"
+    ca_config, leaf_config = d / "ca.cnf", d / "leaf.cnf"
+    ca_config.write_text(
+        "\n".join(
+            [
+                "[req]",
+                "distinguished_name=subject",
+                "x509_extensions=extensions",
+                "prompt=no",
+                "[subject]",
+                "CN=websocket-rs test CA",
+                "[extensions]",
+                "basicConstraints=critical,CA:TRUE,pathlen:0",
+                "keyUsage=critical,keyCertSign,cRLSign",
+                "subjectKeyIdentifier=hash",
+                "authorityKeyIdentifier=keyid:always",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    leaf_config.write_text(
+        "\n".join(
+            [
+                "[req]",
+                "distinguished_name=subject",
+                "prompt=no",
+                "[subject]",
+                "CN=127.0.0.1",
+                "[extensions]",
+                "subjectAltName=DNS:localhost,IP:127.0.0.1",
+                "basicConstraints=critical,CA:FALSE",
+                "keyUsage=critical,digitalSignature,keyEncipherment",
+                "extendedKeyUsage=serverAuth",
+                "subjectKeyIdentifier=hash",
+                "authorityKeyIdentifier=keyid,issuer",
+            ]
+        ),
+        encoding="utf-8",
+    )
     subprocess.run(
         [
             "openssl",
@@ -85,12 +123,8 @@ def certs(tmp_path_factory):
             str(ca_key),
             "-out",
             str(ca_cert),
-            "-subj",
-            "/CN=websocket-rs test CA",
-            "-addext",
-            "basicConstraints=critical,CA:TRUE,pathlen:0",
-            "-addext",
-            "keyUsage=critical,keyCertSign,cRLSign",
+            "-config",
+            str(ca_config),
         ],
         check=True,
         capture_output=True,
@@ -106,22 +140,11 @@ def certs(tmp_path_factory):
             str(key),
             "-out",
             str(csr),
-            "-subj",
-            "/CN=127.0.0.1",
+            "-config",
+            str(leaf_config),
         ],
         check=True,
         capture_output=True,
-    )
-    extensions.write_text(
-        "\n".join(
-            [
-                "subjectAltName=DNS:localhost,IP:127.0.0.1",
-                "basicConstraints=critical,CA:FALSE",
-                "keyUsage=critical,digitalSignature,keyEncipherment",
-                "extendedKeyUsage=serverAuth",
-            ]
-        ),
-        encoding="utf-8",
     )
     subprocess.run(
         [
@@ -136,11 +159,14 @@ def certs(tmp_path_factory):
             str(ca_cert),
             "-CAkey",
             str(ca_key),
-            "-CAcreateserial",
+            "-set_serial",
+            "2",
             "-out",
             str(cert),
             "-extfile",
-            str(extensions),
+            str(leaf_config),
+            "-extensions",
+            "extensions",
         ],
         check=True,
         capture_output=True,
