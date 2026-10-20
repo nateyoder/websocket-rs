@@ -538,29 +538,54 @@ def test_rustls_peer_close_waits_for_paused_plaintext_on_uvloop(certs):
 
 
 @pytest.mark.skipif(not _rustls_available(), reason="built without the rustls-transport feature")
-def test_rustls_capacity_error_reaches_pending_and_later_recv_on_uvloop(certs):
-    """The Rust TLS terminal cause survives the NativeClient teardown boundary."""
+def test_rustls_capacity_error_reaches_pending_and_later_recv_on_uvloop(certs, monkeypatch):
+    """The Rust TLS transport forwards its capacity cause through teardown."""
     loop_factory = pytest.importorskip("uvloop").new_event_loop
     cert, key = certs
 
     async def run():
-        async def idle(ws):
+        start = asyncio.Event()
+        helper = __import__("websocket_rs._native_connect_helper", fromlist=["*"])
+        original_select = helper._select_create_connection
+        captured = {}
+
+        def capture_create_connection(loop, is_tls, tls_backend):
+            create_connection = original_select(loop, is_tls, tls_backend)
+
+            async def create_and_capture(*args, **kwargs):
+                transport, protocol = await create_connection(*args, **kwargs)
+                captured["raw_transport"] = transport
+                captured["rustls_transport"] = protocol
+                return transport, protocol
+
+            return create_and_capture
+
+        monkeypatch.setattr(helper, "_select_create_connection", capture_create_connection)
+
+        async def overflow_while_paused(ws):
+            await start.wait()
+            frame = b"\x82\x7e\x40\x00" + (b"x" * (16 * 1024))
+            for _ in range(65):
+                ws.transport.write(frame)
             await ws.wait_closed()
 
-        async with _Peer(cert, key, handler=idle) as peer:
+        async with _Peer(cert, key, handler=overflow_while_paused) as peer:
             client = await connect(
                 peer.url,
                 connect_timeout=10,
                 **_backend_kwargs("rustls", cert),
             )
+            assert type(captured["rustls_transport"]).__name__ == "RustlsTransport"
             pending = asyncio.ensure_future(client.recv())
-            cause = NativeReceiveCapacityError(
-                "Rust TLS pending plaintext exceeds 1 MiB read-flow bound"
-            )
-            client.connection_lost(cause)
-            assert client.terminal_error is cause
+            client.pause_reading()
+            # Keep the Rust TLS delivery seam paused while allowing the raw TCP
+            # transport to supply already-received ciphertext. This constructs
+            # the capacity edge without recording or replaying encrypted bytes.
+            captured["raw_transport"].resume_reading()
+            start.set()
             with pytest.raises(NativeReceiveCapacityError, match="1 MiB read-flow bound"):
                 await asyncio.wait_for(pending, RECV_TIMEOUT)
+            assert isinstance(client.terminal_error, NativeReceiveCapacityError)
             with pytest.raises(NativeReceiveCapacityError, match="1 MiB read-flow bound"):
                 await client.recv()
             client.close()
