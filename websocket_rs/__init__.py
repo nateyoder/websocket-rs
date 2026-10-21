@@ -43,6 +43,7 @@ connect = native_client.connect
 
 # Canonical message type (zero-copy buffer-protocol view).
 WSMessage = native_client.WSMessage
+NativeReceiveCapacityError = native_client.NativeReceiveCapacityError
 
 # The shipped version, read from the installed distribution metadata rather than
 # hard-coded: a literal fell behind before (this read "0.7.1" through both the
@@ -66,6 +67,7 @@ except ImportError:  # pragma: no cover - importlib.metadata is stdlib on 3.12+
 __all__ = [
     "connect",
     "WSMessage",
+    "NativeReceiveCapacityError",
     "native_client",
     "sync",
     "async_client",

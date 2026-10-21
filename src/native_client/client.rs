@@ -16,6 +16,7 @@ use std::cell::RefCell;
 
 use super::codec::*;
 use super::protocol::*;
+use super::NativeReceiveCapacityError;
 
 pub(crate) type PingRegistry = HashMap<Arc<[u8]>, PendingPing>;
 
@@ -127,6 +128,9 @@ pub(crate) struct State {
     pub(crate) on_message: Option<Py<PyAny>>,
     pub(crate) pending_callback_msgs: VecDeque<Py<WSMessage>>,
     pub(crate) closed: bool,
+    /// Stable local terminal cause exposed after teardown. Ordinary remote and
+    /// client closes remain unclassified (`None`).
+    pub(crate) terminal_error: Option<Py<PyAny>>,
     /// asyncio transport has passed its high-water mark — hold off on writes.
     pub(crate) paused: bool,
     /// True when we know asyncio's internal write buffer is empty — lets the
@@ -771,6 +775,35 @@ impl NativeClient {
         Ok(())
     }
 
+    /// Pause socket reads at the active transport. Rust TLS additionally stops
+    /// parser delivery at the current WebSocket frame boundary.
+    fn pause_reading(&self, py: Python<'_>) -> PyResult<()> {
+        let transport = self
+            .state
+            .borrow()
+            .transport
+            .as_ref()
+            .map(|t| t.clone_ref(py));
+        if let Some(transport) = transport {
+            transport.bind(py).call_method0("pause_reading")?;
+        }
+        Ok(())
+    }
+
+    /// Resume parser delivery before re-enabling reads on the raw transport.
+    fn resume_reading(&self, py: Python<'_>) -> PyResult<()> {
+        let transport = self
+            .state
+            .borrow()
+            .transport
+            .as_ref()
+            .map(|t| t.clone_ref(py));
+        if let Some(transport) = transport {
+            transport.bind(py).call_method0("resume_reading")?;
+        }
+        Ok(())
+    }
+
     /// The peer half-closed (TCP FIN, or TLS close_notify). No further frame can
     /// arrive, so let the transport close itself and let `connection_lost` do the
     /// cleanup: returning true would mean "the protocol keeps this open", which is
@@ -785,15 +818,31 @@ impl NativeClient {
         false
     }
 
-    fn connection_lost(&self, py: Python<'_>, _exc: Py<PyAny>) -> PyResult<()> {
+    fn connection_lost(&self, py: Python<'_>, exc: Py<PyAny>) -> PyResult<()> {
         let callback_result = self.flush_pending_callbacks(py);
-        let pending = {
+        let capacity_exhausted = exc.bind(py).is_instance_of::<NativeReceiveCapacityError>();
+        let mut pending = {
             let mut state = self.state.borrow_mut();
             state.closed = true;
+            if capacity_exhausted {
+                state.terminal_error = Some(exc.clone_ref(py));
+            }
             state.release_references();
             state.take_pending()
         };
-        Self::fail_pending(py, pending, "Connection lost");
+        if capacity_exhausted {
+            while let Some(future) = pending.pop_front() {
+                Self::set_future_exception(
+                    py,
+                    future.bind(py),
+                    NativeReceiveCapacityError::new_err(
+                        "Rust TLS pending plaintext exceeds 1 MiB read-flow bound",
+                    ),
+                );
+            }
+        } else {
+            Self::fail_pending(py, pending, "Connection lost");
+        }
         callback_result
     }
 
@@ -978,7 +1027,16 @@ impl NativeClient {
         // Closed path: same — ReadyMessage carrying an exception short-circuits
         // awaits without a Future alloc.
         if state.closed {
+            let capacity_exhausted = state.terminal_error.is_some();
             drop(state);
+            if capacity_exhausted {
+                return ready_err(
+                    py,
+                    NativeReceiveCapacityError::new_err(
+                        "Rust TLS pending plaintext exceeds 1 MiB read-flow bound",
+                    ),
+                );
+            }
             return ready_err(py, PyConnectionError::new_err("Connection closed"));
         }
         // Slow path: use cached loop.create_future + optional asyncio.wait_for.
@@ -999,6 +1057,15 @@ impl NativeClient {
             return wait_for.bind(py).call1((fut, t));
         }
         Ok(fut)
+    }
+
+    #[getter]
+    fn terminal_error(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.state
+            .borrow()
+            .terminal_error
+            .as_ref()
+            .map(|error| error.clone_ref(py))
     }
 
     #[getter]

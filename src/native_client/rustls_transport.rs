@@ -8,14 +8,36 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
 use super::client::NativeClient;
+use super::NativeReceiveCapacityError;
 
 struct State {
     tls: rustls::ClientConnection,
     inner: Option<Py<NativeClient>>,
     transport: Option<Py<PyAny>>,
     plaintext: Vec<u8>,
+    plaintext_used: usize,
+    websocket_mode: bool,
+    frame_remaining: Option<usize>,
     ciphertext: Vec<u8>,
     closing: bool,
+    read_paused: bool,
+    peer_closed: bool,
+    terminal_error: Option<Py<PyAny>>,
+}
+
+const MAX_PENDING_PLAINTEXT: usize = 1024 * 1024;
+const MAX_HANDSHAKE_BYTES: usize = 64 * 1024;
+
+fn ensure_pending_plaintext_capacity(pending: usize, additional: usize) -> PyResult<()> {
+    if pending
+        .checked_add(additional)
+        .is_none_or(|total| total > MAX_PENDING_PLAINTEXT)
+    {
+        return Err(NativeReceiveCapacityError::new_err(
+            "Rust TLS pending plaintext exceeds 1 MiB read-flow bound",
+        ));
+    }
+    Ok(())
 }
 
 #[pyclass(unsendable)]
@@ -63,8 +85,14 @@ impl RustlsTransport {
                 inner: Some(inner),
                 transport: None,
                 plaintext: Vec::new(),
+                plaintext_used: 0,
+                websocket_mode: false,
+                frame_remaining: None,
                 ciphertext: Vec::new(),
                 closing: false,
+                read_paused: false,
+                peer_closed: false,
+                terminal_error: None,
             }),
         })
     }
@@ -97,9 +125,11 @@ impl RustlsTransport {
     }
 
     fn fail(&self, py: Python<'_>, err: PyErr) -> PyResult<()> {
+        let error = err.value(py).clone().unbind();
         let (inner, transport) = {
             let mut st = self.state.borrow_mut();
             st.closing = true;
+            st.terminal_error = Some(error.clone_ref(py).into_any());
             (
                 st.inner.as_ref().map(|c| c.clone_ref(py)),
                 st.transport.as_ref().map(|t| t.clone_ref(py)),
@@ -118,6 +148,141 @@ impl RustlsTransport {
         }
         Ok(())
     }
+
+    fn drain_plaintext(&self, py: Python<'_>) -> PyResult<()> {
+        loop {
+            let next = {
+                let mut st = self.state.borrow_mut();
+                if st.closing || st.read_paused || st.plaintext_used == st.plaintext.len() {
+                    if st.plaintext_used == st.plaintext.len() {
+                        st.plaintext.clear();
+                        st.plaintext_used = 0;
+                    }
+                    return Ok(());
+                }
+
+                let available_len = st.plaintext.len() - st.plaintext_used;
+                let take = if !st.websocket_mode {
+                    match st.plaintext[st.plaintext_used..]
+                        .windows(4)
+                        .position(|w| w == b"\r\n\r\n")
+                    {
+                        Some(pos) => {
+                            st.websocket_mode = true;
+                            pos + 4
+                        }
+                        None if available_len > MAX_HANDSHAKE_BYTES => {
+                            return Err(PyConnectionError::new_err(
+                                "Rust TLS WebSocket handshake exceeds 64 KiB",
+                            ));
+                        }
+                        None => return Ok(()),
+                    }
+                } else if let Some(remaining) = st.frame_remaining {
+                    remaining.min(available_len)
+                } else {
+                    let frame_len = {
+                        let available = &st.plaintext[st.plaintext_used..];
+                        websocket_frame_len(available)?
+                    };
+                    let Some(frame_len) = frame_len else {
+                        return Ok(());
+                    };
+                    st.frame_remaining = Some(frame_len);
+                    frame_len.min(available_len)
+                };
+
+                let start = st.plaintext_used;
+                let end = start + take;
+                let chunk = st.plaintext[start..end].to_vec();
+                st.plaintext_used = end;
+                if st.websocket_mode {
+                    if let Some(remaining) = st.frame_remaining.as_mut() {
+                        *remaining -= take;
+                        if *remaining == 0 {
+                            st.frame_remaining = None;
+                        }
+                    }
+                }
+                (chunk, st.inner.as_ref().map(|c| c.clone_ref(py)))
+            };
+
+            if let (chunk, Some(inner)) = next {
+                inner.borrow(py).data_received_plaintext(py, &chunk)?;
+            }
+        }
+    }
+
+    fn finish_peer_close(&self, py: Python<'_>) -> PyResult<()> {
+        let terminal = {
+            let st = self.state.borrow();
+            if st.closing || !st.peer_closed || st.read_paused {
+                return Ok(());
+            }
+            st.plaintext_used == st.plaintext.len()
+        };
+        if terminal {
+            self.close(py)
+        } else {
+            self.fail(
+                py,
+                PyConnectionError::new_err(
+                    "Rust TLS peer closed with an incomplete WebSocket frame",
+                ),
+            )
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_plaintext_bound_has_a_stable_public_error_type() {
+        Python::initialize();
+        Python::attach(|py| {
+            assert!(ensure_pending_plaintext_capacity(MAX_PENDING_PLAINTEXT, 0).is_ok());
+            let error = ensure_pending_plaintext_capacity(MAX_PENDING_PLAINTEXT, 1).unwrap_err();
+            assert!(error.is_instance_of::<NativeReceiveCapacityError>(py));
+            assert_eq!(
+                error.to_string(),
+                "NativeReceiveCapacityError: Rust TLS pending plaintext exceeds 1 MiB read-flow bound"
+            );
+        });
+    }
+}
+
+fn websocket_frame_len(data: &[u8]) -> PyResult<Option<usize>> {
+    if data.len() < 2 {
+        return Ok(None);
+    }
+    let masked = data[1] & 0x80 != 0;
+    let short = (data[1] & 0x7f) as usize;
+    let (header, payload): (usize, usize) = match short {
+        126 => {
+            if data.len() < 4 {
+                return Ok(None);
+            }
+            (4, u16::from_be_bytes([data[2], data[3]]) as usize)
+        }
+        127 => {
+            if data.len() < 10 {
+                return Ok(None);
+            }
+            let n = u64::from_be_bytes(data[2..10].try_into().unwrap());
+            let payload = usize::try_from(n).map_err(|_| {
+                PyConnectionError::new_err("WebSocket frame length exceeds platform limits")
+            })?;
+            (10, payload)
+        }
+        n => (2, n),
+    };
+    header
+        .checked_add(if masked { 4 } else { 0 })
+        .and_then(|n| n.checked_add(payload))
+        .map(Some)
+        .ok_or_else(|| PyConnectionError::new_err("WebSocket frame length overflow"))
 }
 
 fn io_error(e: std::io::Error) -> PyErr {
@@ -143,15 +308,13 @@ impl RustlsTransport {
         if self.state.borrow().closing {
             return Ok(());
         }
-        let decoded: PyResult<(Vec<u8>, usize, bool)> = (|| {
+        let decoded: PyResult<()> = (|| {
             let mut st = self.state.borrow_mut();
             let mut input = data;
             // Kept at its high-water length, never cleared: `read_to_end` treats
             // spare capacity as uninitialised and zeroes it on every call, which
             // profiling showed as a full-size memset per message. Reading into
             // an already-initialised slice with a separate used-length skips it.
-            let mut plain = std::mem::take(&mut st.plaintext);
-            let mut used = 0usize;
             let mut peer_closed = false;
             while !input.is_empty() {
                 let n = st.tls.read_tls(&mut input).map_err(io_error)?;
@@ -178,41 +341,43 @@ impl RustlsTransport {
                 // rather than grown-and-zeroed by read_to_end.
                 let want = io.plaintext_bytes_to_read();
                 if want > 0 {
-                    if plain.len() < used + want {
-                        plain.resize(used + want, 0);
+                    let pending = st.plaintext.len() - st.plaintext_used;
+                    ensure_pending_plaintext_capacity(pending, want)?;
+                    if st.plaintext_used > 0 {
+                        let used = st.plaintext_used;
+                        st.plaintext.copy_within(used.., 0);
+                        st.plaintext.truncate(pending);
+                        st.plaintext_used = 0;
                     }
+                    let start = st.plaintext.len();
+                    st.plaintext.resize(start + want, 0);
                     // `read` rather than `read_exact`: a short read advances
                     // `used` by exactly what was copied, and the remainder is
                     // re-reported by the next `plaintext_bytes_to_read()`, so
                     // no already-consumed plaintext can be dropped.
-                    match st.tls.reader().read(&mut plain[used..used + want]) {
-                        Ok(n) => used += n,
+                    let read = {
+                        let State { tls, plaintext, .. } = &mut *st;
+                        tls.reader().read(&mut plaintext[start..start + want])
+                    };
+                    match read {
+                        Ok(n) => st.plaintext.truncate(start + n),
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
                         Err(e) => return Err(io_error(e)),
                     }
                 }
             }
-            Ok((plain, used, peer_closed))
+            if peer_closed {
+                st.peer_closed = true;
+            }
+            Ok(())
         })();
-        let (plain, used, peer_closed) = match decoded {
-            Ok(v) => v,
+        match decoded {
+            Ok(()) => (),
             Err(e) => return self.fail(py, e),
-        };
+        }
         self.flush(py)?;
-        let inner = self.state.borrow().inner.as_ref().map(|c| c.clone_ref(py));
-        if let Some(c) = inner {
-            let c = c.borrow(py);
-            // One shared policy with NativeClient::data_received rather than a
-            // second copy here: queued callbacks are flushed whether or not the
-            // parse succeeded, and the parse result is returned afterwards.
-            c.data_received_plaintext(py, &plain[..used])?;
-        }
-        // Hand the buffer back at full length; `used` bounds the live bytes.
-        self.state.borrow_mut().plaintext = plain;
-        if peer_closed {
-            self.close(py)?;
-        }
-        Ok(())
+        self.drain_plaintext(py)?;
+        self.finish_peer_close(py)
     }
 
     fn write(&self, py: Python<'_>, data: &[u8]) -> PyResult<()> {
@@ -281,6 +446,50 @@ impl RustlsTransport {
         Ok(())
     }
 
+    fn pause_reading(&self, py: Python<'_>) -> PyResult<()> {
+        let transport = {
+            let mut st = self.state.borrow_mut();
+            if st.closing || st.read_paused {
+                return Ok(());
+            }
+            st.read_paused = true;
+            st.transport.as_ref().map(|t| t.clone_ref(py))
+        };
+        if let Some(t) = transport {
+            t.bind(py).call_method0("pause_reading")?;
+        }
+        Ok(())
+    }
+
+    fn resume_reading(&self, py: Python<'_>) -> PyResult<()> {
+        {
+            let mut st = self.state.borrow_mut();
+            if st.closing || !st.read_paused {
+                return Ok(());
+            }
+            st.read_paused = false;
+        }
+        self.drain_plaintext(py)?;
+        self.finish_peer_close(py)?;
+        let transport = {
+            let st = self.state.borrow();
+            if st.closing || st.read_paused {
+                None
+            } else {
+                st.transport.as_ref().map(|t| t.clone_ref(py))
+            }
+        };
+        if let Some(t) = transport {
+            t.bind(py).call_method0("resume_reading")?;
+        }
+        Ok(())
+    }
+
+    fn is_reading(&self) -> bool {
+        let st = self.state.borrow();
+        !st.closing && !st.read_paused
+    }
+
     fn eof_received(&self) -> bool {
         false
     }
@@ -303,14 +512,17 @@ impl RustlsTransport {
     }
 
     fn connection_lost(&self, py: Python<'_>, exc: Py<PyAny>) -> PyResult<()> {
-        let inner = {
+        let (inner, terminal_error) = {
             let mut st = self.state.borrow_mut();
             st.closing = true;
+            st.plaintext.clear();
+            st.plaintext_used = 0;
             st.transport = None;
-            st.inner.take()
+            (st.inner.take(), st.terminal_error.take())
         };
         if let Some(c) = inner {
-            c.bind(py).call_method1("connection_lost", (exc,))?;
+            c.bind(py)
+                .call_method1("connection_lost", (terminal_error.unwrap_or(exc),))?;
         }
         Ok(())
     }

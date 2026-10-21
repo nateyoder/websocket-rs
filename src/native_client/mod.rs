@@ -30,13 +30,19 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use bytes::BytesMut;
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyConnectionError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use std::cell::RefCell;
 use url::Url;
 
 use crate::DEFAULT_CONNECT_TIMEOUT;
+
+pyo3::create_exception!(
+    websocket_rs.native_client,
+    NativeReceiveCapacityError,
+    PyConnectionError
+);
 
 /// Connect to a ws:// or wss:// URI and return a NativeClient once the handshake completes.
 ///
@@ -122,6 +128,7 @@ fn connect<'py>(
             on_message,
             pending_callback_msgs: VecDeque::new(),
             closed: false,
+            terminal_error: None,
             paused: false,
             buf_known_empty: false,
             mask_pool: Vec::new(),
@@ -351,6 +358,10 @@ fn get_connect_helper(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
 
 pub fn register_native_client(py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let m = PyModule::new(py, "native_client")?;
+    m.add(
+        "NativeReceiveCapacityError",
+        py.get_type::<NativeReceiveCapacityError>(),
+    )?;
     m.add_class::<NativeClient>()?;
     m.add_class::<NativeClientBuffered>()?;
     m.add_class::<WSMessage>()?;
